@@ -2,8 +2,11 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Streaming AI Chat",
-  description: "Week 1 AI integration practice"
+  title: "Streamwise AI",
+  description: "A streaming Gemini chat built during Week 1 of AI integration practice",
+  icons: {
+    icon: "/icon.svg"
+  }
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
