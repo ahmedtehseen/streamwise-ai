@@ -26,6 +26,12 @@ This app teaches the basic AI integration loop:
 
 This learning project saves its conversation list locally in the browser, so it persists after a page refresh on this device. It does not yet use a database, authentication, or cross-device sync.
 
+## Week 2 milestone: structured study plans
+
+Enter a topic and select **Plan**. The new `POST /api/study-plan` route asks Gemini for JSON using a small response schema, validates the parsed result on the server, and returns a typed study-plan card to the browser. This shows the production pattern for model output that an interface or downstream system needs to rely on: request a defined shape, then validate it anyway before using it.
+
+It uses the existing `GEMINI_API_KEY`; no database, authentication, or new service is required. The plan route is intentionally non-streaming because the browser only renders it after the whole JSON document has been parsed and validated.
+
 ## What to experiment with
 
 - Change the system message in `app/api/chat/route.ts` and see how output changes.
