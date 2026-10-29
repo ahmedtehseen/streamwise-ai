@@ -70,6 +70,7 @@ export default function Home() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [input, setInput] = useState("");
+  const [isSpecMode, setIsSpecMode] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [hasHydrated, setHasHydrated] = useState(false);
   const threadEndRef = useRef<HTMLDivElement>(null);
@@ -114,6 +115,7 @@ export default function Home() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSpecMode) return createTaskSpec();
     const text = input.trim();
     if (!text || isLoading) return;
 
@@ -158,7 +160,7 @@ export default function Home() {
     const request = input.trim();
     if (!request || isLoading) return;
 
-    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: `Create a structured task spec for: ${request}` };
+    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: request };
     const assistantMessage: ChatMessage = { id: crypto.randomUUID(), role: "assistant", content: "" };
     const existingMessages = activeConversation?.messages ?? [];
     const conversationId = activeConversation?.id ?? crypto.randomUUID();
@@ -179,6 +181,8 @@ export default function Home() {
       updateMessages(conversationId, (current) => current.map((message) => message.id === assistantMessage.id ? { ...message, taskSpec: payload.taskSpec } : message));
     } catch (caughtError) {
       const error = caughtError instanceof Error ? caughtError.message : "Something went wrong.";
+      setInput(request);
+      window.setTimeout(() => inputRef.current?.focus(), 0);
       updateMessages(conversationId, (current) => current.map((message) => message.id === assistantMessage.id ? { ...message, content: `Sorry, ${error}` } : message));
     } finally { setIsLoading(false); }
   }
@@ -217,8 +221,8 @@ export default function Home() {
         </section>
         <form className="composer" onSubmit={handleSubmit}>
           <label className="sr-only" htmlFor="prompt">Message</label>
-          <textarea ref={inputRef} id="prompt" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="Message Gemini…" rows={1} disabled={isLoading} />
-          <div className="composer-actions"><button className="plan-button" type="button" onClick={createTaskSpec} disabled={isLoading || !input.trim()} title="Create an editable structured task spec">Spec</button><button className="send-button" type="submit" disabled={isLoading || !input.trim()} aria-label="Send message">↑</button></div>
+          <textarea ref={inputRef} id="prompt" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={isSpecMode ? "Describe a feature to turn into a task spec…" : "Message Gemini…"} rows={1} disabled={isLoading} />
+          <div className="composer-actions"><button className={`plan-button ${isSpecMode ? "active" : ""}`} type="button" onClick={() => setIsSpecMode((current) => !current)} disabled={isLoading} aria-pressed={isSpecMode} title="Toggle editable task specification mode">Spec</button><button className="send-button" type="submit" disabled={isLoading || !input.trim()} aria-label={isSpecMode ? "Create task specification" : "Send message"}>↑</button></div>
         </form>
         <p className="disclaimer">Gemini can make mistakes. Do not enter sensitive information while using the free API tier.</p>
       </section>
