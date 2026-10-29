@@ -4,7 +4,13 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-type ChatMessage = { id: string; role: "user" | "assistant"; content: string };
+type StudyPlan = {
+  title: string;
+  objective: string;
+  estimatedMinutes: number;
+  steps: { title: string; detail: string; minutes: number }[];
+};
+type ChatMessage = { id: string; role: "user" | "assistant"; content: string; studyPlan?: StudyPlan };
 type Conversation = { id: string; title: string; updatedAt: number; messages: ChatMessage[] };
 const STORAGE_KEY = "week-one-ai-chat-conversations";
 
@@ -25,6 +31,19 @@ function MarkdownMessage({ content }: { content: string }) {
         {content}
       </Markdown>
     </div>
+  );
+}
+
+function StudyPlanCard({ plan }: { plan: StudyPlan }) {
+  return (
+    <section className="study-plan" aria-label="Structured study plan">
+      <div className="plan-heading"><span>STRUCTURED PLAN</span><strong>{plan.estimatedMinutes} min</strong></div>
+      <h2>{plan.title}</h2>
+      <p>{plan.objective}</p>
+      <ol>
+        {plan.steps.map((step, index) => <li key={`${step.title}-${index}`}><div><strong>{step.title}</strong><p>{step.detail}</p></div><span>{step.minutes}m</span></li>)}
+      </ol>
+    </section>
   );
 }
 
@@ -112,6 +131,35 @@ export default function Home() {
     } finally { setIsLoading(false); }
   }
 
+  async function createStudyPlan() {
+    const topic = input.trim();
+    if (!topic || isLoading) return;
+
+    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: `Create a study plan for: ${topic}` };
+    const assistantMessage: ChatMessage = { id: crypto.randomUUID(), role: "assistant", content: "" };
+    const existingMessages = activeConversation?.messages ?? [];
+    const conversationId = activeConversation?.id ?? crypto.randomUUID();
+
+    if (activeConversation) {
+      updateMessages(conversationId, () => [...existingMessages, userMessage, assistantMessage]);
+    } else {
+      setConversations((current) => [{ id: conversationId, title: topic.length > 42 ? `${topic.slice(0, 42)}…` : topic, updatedAt: Date.now(), messages: [...existingMessages, userMessage, assistantMessage] }, ...current]);
+      setActiveConversationId(conversationId);
+    }
+    setInput("");
+    setIsLoading(true);
+
+    try {
+      const response = await fetch("/api/study-plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topic }) });
+      const payload = await response.json() as { plan?: StudyPlan; error?: string };
+      if (!response.ok || !payload.plan) throw new Error(payload.error || "The study plan could not be created.");
+      updateMessages(conversationId, (current) => current.map((message) => message.id === assistantMessage.id ? { ...message, studyPlan: payload.plan } : message));
+    } catch (caughtError) {
+      const error = caughtError instanceof Error ? caughtError.message : "Something went wrong.";
+      updateMessages(conversationId, (current) => current.map((message) => message.id === assistantMessage.id ? { ...message, content: `Sorry, ${error}` } : message));
+    } finally { setIsLoading(false); }
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar" aria-label="Conversation history">
@@ -140,14 +188,14 @@ export default function Home() {
           {messages.length === 0 ? (
             <div className="welcome"><span className="welcome-mark">✦</span><h2>How can I help you learn today?</h2><p>This is a real streaming conversation. Ask a question, then follow up and Gemini receives the earlier messages as context.</p><button type="button" className="prompt-chip" onClick={() => setInput("Explain streaming AI responses in a Next.js app using four short sections.")}>Explain streaming responses</button></div>
           ) : messages.map((message) => (
-            <article className={`message ${message.role}`} key={message.id}><div className="avatar">{message.role === "user" ? "T" : "✦"}</div><div className="message-body"><p className="message-role">{message.role === "user" ? "You" : "Gemini"}</p>{message.content ? <MarkdownMessage content={message.content} /> : <p>{isLoading ? <span className="typing">Thinking<span>…</span></span> : "No response received."}</p>}</div></article>
+            <article className={`message ${message.role}`} key={message.id}><div className="avatar">{message.role === "user" ? "T" : "✦"}</div><div className="message-body"><p className="message-role">{message.role === "user" ? "You" : "Gemini"}</p>{message.studyPlan ? <StudyPlanCard plan={message.studyPlan} /> : message.content ? <MarkdownMessage content={message.content} /> : <p>{isLoading ? <span className="typing">Thinking<span>…</span></span> : "No response received."}</p>}</div></article>
           ))}
           <div ref={threadEndRef} />
         </section>
         <form className="composer" onSubmit={handleSubmit}>
           <label className="sr-only" htmlFor="prompt">Message</label>
           <textarea ref={inputRef} id="prompt" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="Message Gemini…" rows={1} disabled={isLoading} />
-          <button className="send-button" type="submit" disabled={isLoading || !input.trim()} aria-label="Send message">↑</button>
+          <div className="composer-actions"><button className="plan-button" type="button" onClick={createStudyPlan} disabled={isLoading || !input.trim()} title="Create a structured study plan">Plan</button><button className="send-button" type="submit" disabled={isLoading || !input.trim()} aria-label="Send message">↑</button></div>
         </form>
         <p className="disclaimer">Gemini can make mistakes. Do not enter sensitive information while using the free API tier.</p>
       </section>
