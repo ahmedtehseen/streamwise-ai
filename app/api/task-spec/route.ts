@@ -41,7 +41,16 @@ export async function POST(request: Request) {
     }
   );
 
-  if (!geminiResponse.ok) return Response.json({ error: (await geminiResponse.text()) || "Gemini could not create the task specification." }, { status: geminiResponse.status || 502 });
+  if (!geminiResponse.ok) {
+    const fallback = "Gemini could not create the task specification. Please try again.";
+    if (geminiResponse.status === 429 || geminiResponse.status === 503) {
+      return Response.json({ error: "Gemini is temporarily busy. Please try again in a moment." }, { status: 503 });
+    }
+    if (geminiResponse.status === 401 || geminiResponse.status === 403) {
+      return Response.json({ error: "Gemini could not authenticate the API key. Check GEMINI_API_KEY and try again." }, { status: 502 });
+    }
+    return Response.json({ error: fallback }, { status: geminiResponse.status || 502 });
+  }
   const payload = await geminiResponse.json();
   const text = payload.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text ?? "").join("");
   try {
