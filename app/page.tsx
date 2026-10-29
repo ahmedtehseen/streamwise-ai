@@ -41,6 +41,33 @@ function MarkdownMessage({ content }: { content: string }) {
   );
 }
 
+function ConversationTitle({ title }: { title: string }) {
+  const viewportRef = useRef<HTMLSpanElement>(null);
+  const trackRef = useRef<HTMLSpanElement>(null);
+  const [canScroll, setCanScroll] = useState(false);
+
+  useEffect(() => {
+    const update = () => setCanScroll((trackRef.current?.scrollWidth ?? 0) > (viewportRef.current?.clientWidth ?? 0));
+    update();
+    const observer = new ResizeObserver(update);
+    if (viewportRef.current) observer.observe(viewportRef.current);
+    return () => observer.disconnect();
+  }, [title]);
+
+  return <span className={`conversation-title ${canScroll ? "is-overflowing" : ""}`} ref={viewportRef}><span className="conversation-title-track" ref={trackRef}><span>{title}</span>{canScroll && <span aria-hidden="true">{title}</span>}</span></span>;
+}
+
+function migrateStoredConversations(conversations: Conversation[]) {
+  return conversations.map((conversation) => ({
+    ...conversation,
+    messages: conversation.messages.map((message) =>
+      message.role === "assistant" && message.content.includes("This model is currently experiencing high demand")
+        ? { ...message, content: "Sorry, Gemini is temporarily busy. Please try again in a moment." }
+        : message
+    )
+  }));
+}
+
 function StudyPlanCard({ plan }: { plan: LegacyStudyPlan }) {
   return (
     <section className="study-plan" aria-label="Structured study plan">
@@ -71,6 +98,7 @@ export default function Home() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [isSpecMode, setIsSpecMode] = useState(false);
+  const [menuConversationId, setMenuConversationId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [hasHydrated, setHasHydrated] = useState(false);
   const threadEndRef = useRef<HTMLDivElement>(null);
@@ -81,7 +109,7 @@ export default function Home() {
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem(STORAGE_KEY);
-      if (saved) { const parsed = JSON.parse(saved) as Conversation[]; if (Array.isArray(parsed)) setConversations(parsed); }
+      if (saved) { const parsed = JSON.parse(saved) as Conversation[]; if (Array.isArray(parsed)) setConversations(migrateStoredConversations(parsed)); }
     } catch { /* Ignore malformed local storage. */ } finally { setHasHydrated(true); }
   }, []);
 
@@ -91,6 +119,7 @@ export default function Home() {
   function startNewChat() {
     if (isLoading) return;
     setActiveConversationId(null);
+    setMenuConversationId(null);
     setInput("");
     window.setTimeout(() => inputRef.current?.focus(), 0);
   }
@@ -110,6 +139,7 @@ export default function Home() {
   function deleteConversation(conversationId: string) {
     if (isLoading) return;
     setConversations((current) => current.filter((conversation) => conversation.id !== conversationId));
+    setMenuConversationId(null);
     if (conversationId === activeConversationId) startNewChat();
   }
 
@@ -198,8 +228,8 @@ export default function Home() {
           <p className="sidebar-label">Recent</p>
           {conversations.length === 0 ? <p className="empty-history">Your chats will appear here.</p> : conversations.map((conversation) => (
             <div className={`conversation-row ${conversation.id === activeConversationId ? "active" : ""}`} key={conversation.id}>
-              <button className="conversation-button" type="button" onClick={() => setActiveConversationId(conversation.id)} disabled={isLoading}><span>{conversation.title}</span><small>{formatDate(conversation.updatedAt)}</small></button>
-              <button className="delete-button" type="button" onClick={() => deleteConversation(conversation.id)} aria-label={`Delete ${conversation.title}`} disabled={isLoading}>×</button>
+              <button className="conversation-button" type="button" onClick={() => { setActiveConversationId(conversation.id); setMenuConversationId(null); }} disabled={isLoading}><ConversationTitle title={conversation.title} /><small>{formatDate(conversation.updatedAt)}</small></button>
+              <div className="conversation-actions"><button className="conversation-more" type="button" onClick={() => setMenuConversationId((current) => current === conversation.id ? null : conversation.id)} aria-label={`More options for ${conversation.title}`} aria-expanded={menuConversationId === conversation.id} disabled={isLoading}>⋯</button>{menuConversationId === conversation.id && <div className="conversation-menu"><button type="button" onClick={() => deleteConversation(conversation.id)}>Delete chat</button></div>}</div>
             </div>
           ))}
         </nav>
@@ -208,7 +238,7 @@ export default function Home() {
 
       <section className="chat-panel">
         <header className="topbar">
-          <div><details className="learning-status"><summary>WEEK 2 · STRUCTURED OUTPUTS <span>⌄</span></summary><div className="learning-log"><p><strong>Week 1</strong><span>Streaming chat, history, deployment</span></p><p className="current"><strong>Week 2</strong><span>JSON schema, Zod validation, editable specs</span></p></div></details><h1>{activeConversation?.title ?? "New conversation"}</h1></div>
+          <div className="chat-heading"><details className="learning-status"><summary>WEEK 2 · STRUCTURED OUTPUTS <span className="status-chevron" aria-hidden="true" /></summary><div className="learning-log"><p><strong>Week 1</strong><span>Streaming chat, history, deployment</span></p><p className="current"><strong>Week 2</strong><span>JSON schema, Zod validation, editable specs</span></p></div></details><h1>{activeConversation?.title ?? "New conversation"}</h1></div>
           <span className="model-pill"><span className="status-dot" /> Gemini 3.5 Flash Lite</span>
         </header>
         <section className="thread" aria-live="polite" aria-label="Chat messages">
