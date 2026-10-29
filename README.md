@@ -28,7 +28,7 @@ This learning project saves its conversation list locally in the browser, so it 
 
 ## Week 2 milestone: structured, editable task specifications
 
-Enter a product or engineering request and select **Spec**. `POST /api/task-spec` asks Gemini for JSON using a response schema, validates the parsed result with Zod on the server, and returns an editable task card with title, priority, acceptance criteria, and implementation notes. This demonstrates the production pattern for AI output that an interface or downstream system needs to rely on: request a defined shape, then validate it anyway before using it.
+Turn on **Spec** mode, enter a product or engineering request, then use the send button. In standard mode the send button continues the streaming chat; in Spec mode it calls `POST /api/task-spec`, which asks Gemini for JSON using a response schema, validates the parsed result with Zod on the server, and returns an editable task card with title, priority, acceptance criteria, and implementation notes. This demonstrates the production pattern for AI output that an interface or downstream system needs to rely on: request a defined shape, then validate it anyway before using it.
 
 It uses the existing `GEMINI_API_KEY`; no database, authentication, or new service is required. The spec route is intentionally non-streaming because the browser only renders it after the whole JSON document has been parsed and validated.
 
