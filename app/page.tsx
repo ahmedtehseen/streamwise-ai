@@ -20,6 +20,7 @@ type TaskSpec = {
 type TaskDraft = { id: string; status: "draft"; createdAt: string; taskSpec: TaskSpec };
 type ChatMessage = { id: string; role: "user" | "assistant"; content: string; studyPlan?: LegacyStudyPlan; taskSpec?: TaskSpec; taskDraft?: TaskDraft };
 type Conversation = { id: string; title: string; updatedAt: number; messages: ChatMessage[] };
+type DraftListItem = { conversationId: string; messageId: string; draft: TaskDraft };
 const STORAGE_KEY = "week-one-ai-chat-conversations";
 
 function formatDate(timestamp: number) {
@@ -103,12 +104,14 @@ export default function Home() {
   const [menuConversationId, setMenuConversationId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [creatingDraftMessageId, setCreatingDraftMessageId] = useState<string | null>(null);
+  const [copiedDraftId, setCopiedDraftId] = useState<string | null>(null);
   const [hasHydrated, setHasHydrated] = useState(false);
   const threadEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const activeConversation = useMemo(() => conversations.find((c) => c.id === activeConversationId) ?? null, [activeConversationId, conversations]);
   const messages = activeConversation?.messages ?? [];
   const messageCount = messages.length;
+  const drafts = useMemo(() => conversations.flatMap((conversation) => conversation.messages.flatMap((message): DraftListItem[] => message.taskDraft ? [{ conversationId: conversation.id, messageId: message.id, draft: message.taskDraft }] : [])), [conversations]);
 
   useEffect(() => {
     try {
@@ -205,6 +208,37 @@ export default function Home() {
     }
   }
 
+  function openDraft(draft: DraftListItem) {
+    setActiveConversationId(draft.conversationId);
+    setMenuConversationId(null);
+    window.setTimeout(() => {
+      const target = document.getElementById(`message-${draft.messageId}`);
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+      target?.focus({ preventScroll: true });
+    }, 0);
+  }
+
+  async function copyDraft(draft: TaskDraft) {
+    const spec = draft.taskSpec;
+    const text = [`# ${spec.title}`, "", spec.summary, "", `Priority: ${spec.priority}`, "", "## Acceptance criteria", ...spec.acceptanceCriteria.map((criterion) => `- ${criterion}`), "", "## Implementation notes", ...spec.implementationNotes.map((note) => `- ${note}`)].join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedDraftId(draft.id);
+      window.setTimeout(() => setCopiedDraftId((current) => current === draft.id ? null : current), 2_000);
+    } catch {
+      window.alert("The draft could not be copied. Check browser clipboard permissions and try again.");
+    }
+  }
+
+  function deleteDraft(draft: DraftListItem) {
+    if (!window.confirm(`Delete the draft “${draft.draft.taskSpec.title}”? The editable spec will remain.`)) return;
+    updateMessages(draft.conversationId, (current) => current.map((message) => {
+      if (message.id !== draft.messageId) return message;
+      const { taskDraft, ...rest } = message;
+      return taskDraft ? rest : message;
+    }));
+  }
+
   async function createTaskSpec() {
     const request = input.trim();
     if (!request || isLoading) return;
@@ -252,19 +286,23 @@ export default function Home() {
             </div>
           ))}
         </nav>
+        <section className="drafts-panel" aria-labelledby="drafts-heading">
+          <div className="drafts-panel-heading"><p id="drafts-heading">Draft tasks</p><span>{drafts.length}</span></div>
+          {drafts.length === 0 ? <p className="empty-drafts">Approved task drafts will appear here.</p> : <ul className="draft-list">{drafts.map((draft) => <li key={draft.draft.id}><div className="draft-summary" title={draft.draft.taskSpec.title}><span>{draft.draft.taskSpec.title}</span><small>{draft.draft.taskSpec.priority} priority</small></div><div className="draft-controls"><button type="button" onClick={() => openDraft(draft)} aria-label={`Open ${draft.draft.taskSpec.title}`}>Open</button><button type="button" onClick={() => copyDraft(draft.draft)} aria-label={`Copy ${draft.draft.taskSpec.title}`}>{copiedDraftId === draft.draft.id ? "Copied" : "Copy"}</button><button className="draft-delete" type="button" onClick={() => deleteDraft(draft)} aria-label={`Delete ${draft.draft.taskSpec.title}`}>Delete</button></div></li>)}</ul>}
+        </section>
         <p className="sidebar-note">Stored only in this browser</p>
       </aside>
 
       <section className="chat-panel">
         <header className="topbar">
-          <div className="chat-heading"><details className="learning-status"><summary>WEEK 2 · STRUCTURED OUTPUTS <span className="status-chevron" aria-hidden="true" /></summary><div className="learning-log"><p><strong>Week 1</strong><span>Streaming chat, history, deployment</span></p><p className="current"><strong>Week 2</strong><span>JSON schema, Zod validation, editable specs</span></p></div></details><h1>{activeConversation?.title ?? "New conversation"}</h1></div>
+          <div className="chat-heading"><details className="learning-status"><summary>WEEK 3 · TOOL CALLING <span className="status-chevron" aria-hidden="true" /></summary><div className="learning-log"><p><strong>Week 1</strong><span>Streaming chat, history, deployment</span></p><p><strong>Week 2</strong><span>JSON schema, Zod validation, editable specs</span></p><p className="current"><strong>Week 3</strong><span>Tool calling, approval, local draft workflow</span></p></div></details><h1>{activeConversation?.title ?? "New conversation"}</h1></div>
           <span className="model-pill"><span className="status-dot" /> Gemini 3.5 Flash Lite</span>
         </header>
         <section className="thread" aria-live="polite" aria-label="Chat messages">
           {messages.length === 0 ? (
             <div className="welcome"><span className="welcome-mark">✦</span><h2>How can I help you learn today?</h2><p>This is a real streaming conversation. Ask a question, then follow up and Gemini receives the earlier messages as context.</p><button type="button" className="prompt-chip" onClick={() => setInput("Explain streaming AI responses in a Next.js app using four short sections.")}>Explain streaming responses</button></div>
           ) : messages.map((message) => (
-            <article className={`message ${message.role}`} key={message.id}><div className="avatar">{message.role === "user" ? "T" : "✦"}</div><div className="message-body"><p className="message-role">{message.role === "user" ? "You" : "Gemini"}</p>{message.taskSpec ? <TaskSpecCard spec={message.taskSpec} draft={message.taskDraft} isCreatingDraft={creatingDraftMessageId === message.id} onChange={(taskSpec) => updateTaskSpec(activeConversation!.id, message.id, taskSpec)} onCreateDraft={() => createTaskDraft(activeConversation!.id, message.id, message.taskSpec!)} /> : message.studyPlan ? <StudyPlanCard plan={message.studyPlan} /> : message.content ? <MarkdownMessage content={message.content} /> : <p>{isLoading ? <span className="typing">Thinking<span>…</span></span> : "No response received."}</p>}</div></article>
+            <article className={`message ${message.role}`} id={`message-${message.id}`} tabIndex={message.taskDraft ? -1 : undefined} key={message.id}><div className="avatar">{message.role === "user" ? "T" : "✦"}</div><div className="message-body"><p className="message-role">{message.role === "user" ? "You" : "Gemini"}</p>{message.taskSpec ? <TaskSpecCard spec={message.taskSpec} draft={message.taskDraft} isCreatingDraft={creatingDraftMessageId === message.id} onChange={(taskSpec) => updateTaskSpec(activeConversation!.id, message.id, taskSpec)} onCreateDraft={() => createTaskDraft(activeConversation!.id, message.id, message.taskSpec!)} /> : message.studyPlan ? <StudyPlanCard plan={message.studyPlan} /> : message.content ? <MarkdownMessage content={message.content} /> : <p>{isLoading ? <span className="typing">Thinking<span>…</span></span> : "No response received."}</p>}</div></article>
           ))}
           <div ref={threadEndRef} />
         </section>

@@ -44,6 +44,14 @@ Create an editable spec in **Spec** mode, review it, and choose **Create draft t
 
 The resulting draft receipt is stored with the conversation in browser local storage. It is intentionally not published or sent to an external task system. This keeps the first tool-calling milestone small while demonstrating the important loop: declare a tool, let the model request it, validate arguments, execute application code, and expose a clear approval boundary.
 
+Created drafts also appear in the sidebar's **Draft tasks** section:
+
+- **Open** returns to the originating conversation and focuses the approved spec.
+- **Copy** places a Markdown version of the task, including priority, acceptance criteria, and implementation notes, on the clipboard.
+- **Delete** removes the local draft receipt after confirmation while preserving the editable task spec, so it can be revised and approved again.
+
+The learning-progress menu now marks **Week 3 · Tool calling** as the current milestone and keeps Weeks 1 and 2 visible as completed context.
+
 ### Acceptance criteria
 
 - A valid editable task spec shows a **Create draft task** action.
@@ -51,6 +59,8 @@ The resulting draft receipt is stored with the conversation in browser local sto
 - Gemini can request only the `create_task_draft` tool for this workflow.
 - The server rejects invalid arguments or any change to the approved spec.
 - A successful call returns a draft ID and persists the receipt in the current browser conversation.
+- Created drafts are discoverable from the Draft tasks sidebar section.
+- A draft can be opened, copied as Markdown, or deleted without deleting its source specification.
 - Existing streaming chat and spec generation continue to work unchanged.
 
 ### Prerequisite
