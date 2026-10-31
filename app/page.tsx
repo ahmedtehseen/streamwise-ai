@@ -17,7 +17,8 @@ type TaskSpec = {
   acceptanceCriteria: string[];
   implementationNotes: string[];
 };
-type ChatMessage = { id: string; role: "user" | "assistant"; content: string; studyPlan?: LegacyStudyPlan; taskSpec?: TaskSpec };
+type TaskDraft = { id: string; status: "draft"; createdAt: string; taskSpec: TaskSpec };
+type ChatMessage = { id: string; role: "user" | "assistant"; content: string; studyPlan?: LegacyStudyPlan; taskSpec?: TaskSpec; taskDraft?: TaskDraft };
 type Conversation = { id: string; title: string; updatedAt: number; messages: ChatMessage[] };
 const STORAGE_KEY = "week-one-ai-chat-conversations";
 
@@ -81,14 +82,15 @@ function StudyPlanCard({ plan }: { plan: LegacyStudyPlan }) {
   );
 }
 
-function TaskSpecCard({ spec, onChange }: { spec: TaskSpec; onChange: (next: TaskSpec) => void }) {
+function TaskSpecCard({ spec, draft, isCreatingDraft, onChange, onCreateDraft }: { spec: TaskSpec; draft?: TaskDraft; isCreatingDraft: boolean; onChange: (next: TaskSpec) => void; onCreateDraft: () => void }) {
   return (
     <section className="task-spec" aria-label="Editable structured task specification">
-      <div className="spec-heading"><span>STRUCTURED TASK SPEC</span><select value={spec.priority} onChange={(event) => onChange({ ...spec, priority: event.target.value as TaskSpec["priority"] })} aria-label="Task priority"><option value="low">Low priority</option><option value="medium">Medium priority</option><option value="high">High priority</option></select></div>
-      <input className="spec-title" value={spec.title} onChange={(event) => onChange({ ...spec, title: event.target.value })} aria-label="Task title" />
-      <textarea className="spec-summary" value={spec.summary} onChange={(event) => onChange({ ...spec, summary: event.target.value })} aria-label="Task summary" rows={2} />
-      <div className="spec-section"><h3>Acceptance criteria</h3><ul>{spec.acceptanceCriteria.map((criterion, index) => <li key={index}><input value={criterion} onChange={(event) => { const acceptanceCriteria = [...spec.acceptanceCriteria]; acceptanceCriteria[index] = event.target.value; onChange({ ...spec, acceptanceCriteria }); }} aria-label={`Acceptance criterion ${index + 1}`} /></li>)}</ul></div>
-      <div className="spec-section"><h3>Implementation notes</h3><ul>{spec.implementationNotes.map((note, index) => <li key={index}><input value={note} onChange={(event) => { const implementationNotes = [...spec.implementationNotes]; implementationNotes[index] = event.target.value; onChange({ ...spec, implementationNotes }); }} aria-label={`Implementation note ${index + 1}`} /></li>)}</ul></div>
+      <div className="spec-heading"><span>STRUCTURED TASK SPEC</span><select value={spec.priority} disabled={Boolean(draft)} onChange={(event) => onChange({ ...spec, priority: event.target.value as TaskSpec["priority"] })} aria-label="Task priority"><option value="low">Low priority</option><option value="medium">Medium priority</option><option value="high">High priority</option></select></div>
+      <input className="spec-title" value={spec.title} disabled={Boolean(draft)} onChange={(event) => onChange({ ...spec, title: event.target.value })} aria-label="Task title" />
+      <textarea className="spec-summary" value={spec.summary} disabled={Boolean(draft)} onChange={(event) => onChange({ ...spec, summary: event.target.value })} aria-label="Task summary" rows={2} />
+      <div className="spec-section"><h3>Acceptance criteria</h3><ul>{spec.acceptanceCriteria.map((criterion, index) => <li key={index}><input value={criterion} disabled={Boolean(draft)} onChange={(event) => { const acceptanceCriteria = [...spec.acceptanceCriteria]; acceptanceCriteria[index] = event.target.value; onChange({ ...spec, acceptanceCriteria }); }} aria-label={`Acceptance criterion ${index + 1}`} /></li>)}</ul></div>
+      <div className="spec-section"><h3>Implementation notes</h3><ul>{spec.implementationNotes.map((note, index) => <li key={index}><input value={note} disabled={Boolean(draft)} onChange={(event) => { const implementationNotes = [...spec.implementationNotes]; implementationNotes[index] = event.target.value; onChange({ ...spec, implementationNotes }); }} aria-label={`Implementation note ${index + 1}`} /></li>)}</ul></div>
+      {draft ? <div className="draft-receipt"><strong>Draft created</strong><span>#{draft.id.slice(0, 8)} · saved only in this browser</span></div> : <div className="draft-action"><p>Review the editable spec. Creating a draft is the approval step; nothing is published.</p><button type="button" onClick={onCreateDraft} disabled={isCreatingDraft}>{isCreatingDraft ? "Creating draft…" : "Create draft task"}</button></div>}
     </section>
   );
 }
@@ -100,11 +102,13 @@ export default function Home() {
   const [isSpecMode, setIsSpecMode] = useState(false);
   const [menuConversationId, setMenuConversationId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [creatingDraftMessageId, setCreatingDraftMessageId] = useState<string | null>(null);
   const [hasHydrated, setHasHydrated] = useState(false);
   const threadEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const activeConversation = useMemo(() => conversations.find((c) => c.id === activeConversationId) ?? null, [activeConversationId, conversations]);
   const messages = activeConversation?.messages ?? [];
+  const messageCount = messages.length;
 
   useEffect(() => {
     try {
@@ -114,7 +118,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => { if (hasHydrated) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations)); }, [conversations, hasHydrated]);
-  useEffect(() => { threadEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [messages, isLoading]);
+  useEffect(() => { threadEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [messageCount, isLoading]);
 
   function startNewChat() {
     if (isLoading) return;
@@ -186,6 +190,21 @@ export default function Home() {
     updateMessages(conversationId, (current) => current.map((message) => message.id === messageId ? { ...message, taskSpec } : message));
   }
 
+  async function createTaskDraft(conversationId: string, messageId: string, taskSpec: TaskSpec) {
+    if (isLoading || creatingDraftMessageId) return;
+    setCreatingDraftMessageId(messageId);
+    try {
+      const response = await fetch("/api/task-draft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ taskSpec }) });
+      const payload = await response.json() as { draft?: TaskDraft; error?: string };
+      if (!response.ok || !payload.draft) throw new Error(payload.error || "The draft task could not be created.");
+      updateMessages(conversationId, (current) => current.map((message) => message.id === messageId ? { ...message, taskDraft: payload.draft } : message));
+    } catch (caughtError) {
+      window.alert(caughtError instanceof Error ? caughtError.message : "The draft task could not be created.");
+    } finally {
+      setCreatingDraftMessageId(null);
+    }
+  }
+
   async function createTaskSpec() {
     const request = input.trim();
     if (!request || isLoading) return;
@@ -245,7 +264,7 @@ export default function Home() {
           {messages.length === 0 ? (
             <div className="welcome"><span className="welcome-mark">✦</span><h2>How can I help you learn today?</h2><p>This is a real streaming conversation. Ask a question, then follow up and Gemini receives the earlier messages as context.</p><button type="button" className="prompt-chip" onClick={() => setInput("Explain streaming AI responses in a Next.js app using four short sections.")}>Explain streaming responses</button></div>
           ) : messages.map((message) => (
-            <article className={`message ${message.role}`} key={message.id}><div className="avatar">{message.role === "user" ? "T" : "✦"}</div><div className="message-body"><p className="message-role">{message.role === "user" ? "You" : "Gemini"}</p>{message.taskSpec ? <TaskSpecCard spec={message.taskSpec} onChange={(taskSpec) => updateTaskSpec(activeConversation!.id, message.id, taskSpec)} /> : message.studyPlan ? <StudyPlanCard plan={message.studyPlan} /> : message.content ? <MarkdownMessage content={message.content} /> : <p>{isLoading ? <span className="typing">Thinking<span>…</span></span> : "No response received."}</p>}</div></article>
+            <article className={`message ${message.role}`} key={message.id}><div className="avatar">{message.role === "user" ? "T" : "✦"}</div><div className="message-body"><p className="message-role">{message.role === "user" ? "You" : "Gemini"}</p>{message.taskSpec ? <TaskSpecCard spec={message.taskSpec} draft={message.taskDraft} isCreatingDraft={creatingDraftMessageId === message.id} onChange={(taskSpec) => updateTaskSpec(activeConversation!.id, message.id, taskSpec)} onCreateDraft={() => createTaskDraft(activeConversation!.id, message.id, message.taskSpec!)} /> : message.studyPlan ? <StudyPlanCard plan={message.studyPlan} /> : message.content ? <MarkdownMessage content={message.content} /> : <p>{isLoading ? <span className="typing">Thinking<span>…</span></span> : "No response received."}</p>}</div></article>
           ))}
           <div ref={threadEndRef} />
         </section>

@@ -37,3 +37,22 @@ It uses the existing `GEMINI_API_KEY`; no database, authentication, or new servi
 - Change the system message in `app/api/chat/route.ts` and see how output changes.
 - Add a character limit before the API request.
 - Notice that the server sends the latest 20 messages to Gemini on each request; this is the basic form of conversational memory.
+
+## Week 3 milestone: approved tool calling
+
+Create an editable spec in **Spec** mode, review it, and choose **Create draft task**. That explicit click is the human approval boundary. The server then gives Gemini one declared `create_task_draft` tool and forces a function call. It validates both the approved input and Gemini's tool arguments with the same Zod schema used by spec mode, rejects any model changes, and only then executes the local draft function.
+
+The resulting draft receipt is stored with the conversation in browser local storage. It is intentionally not published or sent to an external task system. This keeps the first tool-calling milestone small while demonstrating the important loop: declare a tool, let the model request it, validate arguments, execute application code, and expose a clear approval boundary.
+
+### Acceptance criteria
+
+- A valid editable task spec shows a **Create draft task** action.
+- No tool is called until the user explicitly selects that action.
+- Gemini can request only the `create_task_draft` tool for this workflow.
+- The server rejects invalid arguments or any change to the approved spec.
+- A successful call returns a draft ID and persists the receipt in the current browser conversation.
+- Existing streaming chat and spec generation continue to work unchanged.
+
+### Prerequisite
+
+Use the existing `GEMINI_API_KEY`. No database, authentication provider, or additional package is needed for this local draft milestone. Authentication and a persistent task store are required before replacing the local draft function with a real write to an external system.
