@@ -46,6 +46,7 @@ h1 { grid-area: title; min-width: 0; margin: 4px 0 0; overflow: hidden; color: #
 .message-body { padding-top: 3px; }
 .message-role { margin: 0 0 7px; color: #dfe1e3; font-size: 13px; font-weight: 650; }
 .message-body > p:last-child { margin: 0; color: #e3e3e3; white-space: pre-wrap; line-height: 1.68; }
+.user-image-message { display: grid; justify-items: start; gap: 12px; }.user-image-preview { position: relative; width: min(420px, 100%); aspect-ratio: 16 / 9; overflow: hidden; border: 1px solid #454c57; border-radius: 10px; background: #1b1d20; }.user-image-preview img { object-fit: contain; }.user-image-fallback { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 9px 11px; border: 1px solid #454c57; border-radius: 8px; background: #24272b; color: #c9cdd3; font-size: 13px; }.user-image-fallback span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.user-image-message .markdown { width: 100%; }
 .markdown { color: #e3e3e3; line-height: 1.68; }
 .markdown > :first-child { margin-top: 0; }
 .markdown > :last-child { margin-bottom: 0; }

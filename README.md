@@ -71,12 +71,13 @@ Use the existing `GEMINI_API_KEY`. No database, authentication provider, or addi
 
 Attach a PNG, JPEG, or WebP product screenshot from the composer, or paste a copied image while the message field is focused. The app automatically switches to **Spec** mode, renders a thumbnail inside the composer, shows the selected-file and processing states, and accepts optional context. `POST /api/task-spec` validates the upload, sends the image and context to Gemini as a multimodal request, and validates the structured result with the same Zod schema used for text requests.
 
-The screenshot is kept only in memory for the request. It is not written to browser storage or a server-side file store. Conversation history keeps the filename, optional context, and resulting editable spec. Draft creation remains a separate, explicit approval step.
+The screenshot is kept only in memory for the request and its submitted-message preview. It is not written to browser storage or a server-side file store. During the current browser session, the user message shows the screenshot above its optional context. After a refresh, conversation history falls back to the filename while preserving the context and resulting editable spec. Draft creation remains a separate, explicit approval step.
 
 ### Acceptance criteria
 
 - The composer accepts one PNG, JPEG, or WebP screenshot up to 5 MB.
 - Selecting or pasting a screenshot shows its thumbnail, filename, size, ready state, and a remove action inside the composer.
+- Submitting a screenshot shows a larger preview in the user message for the current browser session and a filename fallback after refresh.
 - Unsupported, mislabeled, or oversized files are rejected at the API boundary; type and size are also checked in the browser for immediate feedback.
 - Optional context and the screenshot are sent to Gemini in one multimodal request.
 - The generated result must pass the existing task-spec Zod schema before it is rendered.

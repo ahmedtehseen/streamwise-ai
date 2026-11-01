@@ -20,7 +20,7 @@ type TaskSpec = {
   implementationNotes: string[];
 };
 type TaskDraft = { id: string; status: "draft"; createdAt: string; taskSpec: TaskSpec };
-type ChatMessage = { id: string; role: "user" | "assistant"; content: string; pendingLabel?: string; studyPlan?: LegacyStudyPlan; taskSpec?: TaskSpec; taskDraft?: TaskDraft };
+type ChatMessage = { id: string; role: "user" | "assistant"; content: string; imageName?: string; pendingLabel?: string; studyPlan?: LegacyStudyPlan; taskSpec?: TaskSpec; taskDraft?: TaskDraft };
 type Conversation = { id: string; title: string; updatedAt: number; messages: ChatMessage[] };
 type DraftListItem = { conversationId: string; messageId: string; draft: TaskDraft };
 const STORAGE_KEY = "week-one-ai-chat-conversations";
@@ -58,6 +58,15 @@ function MarkdownMessage({ content }: { content: string }) {
       >
         {content}
       </Markdown>
+    </div>
+  );
+}
+
+function UserImageMessage({ name, previewUrl, content }: { name: string; previewUrl?: string; content: string }) {
+  return (
+    <div className="user-image-message">
+      {previewUrl ? <div className="user-image-preview"><Image src={previewUrl} alt={`Submitted screenshot ${name}`} fill sizes="(max-width: 700px) 80vw, 420px" unoptimized /></div> : <div className="user-image-fallback"><span aria-hidden="true">▧</span><span>Screenshot: {name}</span></div>}
+      {content && <MarkdownMessage content={content} />}
     </div>
   );
 }
@@ -121,6 +130,7 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [isSpecMode, setIsSpecMode] = useState(false);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [messageImageUrls, setMessageImageUrls] = useState<Record<string, string>>({});
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [menuConversationId, setMenuConversationId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -130,6 +140,7 @@ export default function Home() {
   const threadEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const messageImageUrlsRef = useRef(messageImageUrls);
   const imagePreviewUrl = useObjectUrl(selectedImage);
   const activeConversation = useMemo(() => conversations.find((c) => c.id === activeConversationId) ?? null, [activeConversationId, conversations]);
   const messages = activeConversation?.messages ?? [];
@@ -145,6 +156,8 @@ export default function Home() {
 
   useEffect(() => { if (hasHydrated) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations)); }, [conversations, hasHydrated]);
   useEffect(() => { threadEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [messageCount, isLoading]);
+  useEffect(() => { messageImageUrlsRef.current = messageImageUrls; }, [messageImageUrls]);
+  useEffect(() => () => { Object.values(messageImageUrlsRef.current).forEach((url) => URL.revokeObjectURL(url)); }, []);
 
   function startNewChat() {
     if (isLoading) return;
@@ -202,8 +215,22 @@ export default function Home() {
     );
   }
 
+  function removeMessageImageUrls(messageIds: string[]) {
+    setMessageImageUrls((current) => {
+      const next = { ...current };
+      messageIds.forEach((messageId) => {
+        if (!next[messageId]) return;
+        URL.revokeObjectURL(next[messageId]);
+        delete next[messageId];
+      });
+      return next;
+    });
+  }
+
   function deleteConversation(conversationId: string) {
     if (isLoading) return;
+    const conversation = conversations.find((item) => item.id === conversationId);
+    if (conversation) removeMessageImageUrls(conversation.messages.map((message) => message.id));
     setConversations((current) => current.filter((conversation) => conversation.id !== conversationId));
     setMenuConversationId(null);
     if (conversationId === activeConversationId) startNewChat();
@@ -303,8 +330,7 @@ export default function Home() {
     const image = selectedImage;
     if ((!request && !image) || isLoading) return;
 
-    const userMessageContent = image ? [`Screenshot: ${image.name}`, request].filter(Boolean).join("\n\n") : request;
-    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: userMessageContent };
+    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: request, imageName: image?.name };
     const assistantMessage: ChatMessage = { id: crypto.randomUUID(), role: "assistant", content: "", pendingLabel: image ? "Analyzing screenshot" : "Creating task spec" };
     const existingMessages = activeConversation?.messages ?? [];
     const conversationId = activeConversation?.id ?? crypto.randomUUID();
@@ -316,6 +342,7 @@ export default function Home() {
       setConversations((current) => [{ id: conversationId, title: title.length > 42 ? `${title.slice(0, 42)}…` : title, updatedAt: Date.now(), messages: [...existingMessages, userMessage, assistantMessage] }, ...current]);
       setActiveConversationId(conversationId);
     }
+    if (image) setMessageImageUrls((current) => ({ ...current, [userMessage.id]: URL.createObjectURL(image) }));
     setInput("");
     clearSelectedImage();
     setIsLoading(true);
@@ -368,7 +395,7 @@ export default function Home() {
           {messages.length === 0 ? (
             <div className="welcome"><span className="welcome-mark">✦</span><h2>How can I help you learn today?</h2><p>Chat with Gemini, create editable task specs, or attach a product screenshot to turn visible feedback into a reviewed draft workflow.</p><button type="button" className="prompt-chip" onClick={() => setInput("Explain streaming AI responses in a Next.js app using four short sections.")}>Explain streaming responses</button></div>
           ) : messages.map((message) => (
-            <article className={`message ${message.role}`} id={`message-${message.id}`} tabIndex={message.taskDraft ? -1 : undefined} key={message.id}><div className="avatar">{message.role === "user" ? "T" : "✦"}</div><div className="message-body"><p className="message-role">{message.role === "user" ? "You" : "Gemini"}</p>{message.taskSpec ? <TaskSpecCard spec={message.taskSpec} draft={message.taskDraft} isCreatingDraft={creatingDraftMessageId === message.id} onChange={(taskSpec) => updateTaskSpec(activeConversation!.id, message.id, taskSpec)} onCreateDraft={() => createTaskDraft(activeConversation!.id, message.id, message.taskSpec!)} /> : message.studyPlan ? <StudyPlanCard plan={message.studyPlan} /> : message.content ? <MarkdownMessage content={message.content} /> : <p>{isLoading ? <span className="typing">{message.pendingLabel ?? "Thinking"}<span>…</span></span> : "No response received."}</p>}</div></article>
+            <article className={`message ${message.role}`} id={`message-${message.id}`} tabIndex={message.taskDraft ? -1 : undefined} key={message.id}><div className="avatar">{message.role === "user" ? "T" : "✦"}</div><div className="message-body"><p className="message-role">{message.role === "user" ? "You" : "Gemini"}</p>{message.imageName ? <UserImageMessage name={message.imageName} previewUrl={messageImageUrls[message.id]} content={message.content} /> : message.taskSpec ? <TaskSpecCard spec={message.taskSpec} draft={message.taskDraft} isCreatingDraft={creatingDraftMessageId === message.id} onChange={(taskSpec) => updateTaskSpec(activeConversation!.id, message.id, taskSpec)} onCreateDraft={() => createTaskDraft(activeConversation!.id, message.id, message.taskSpec!)} /> : message.studyPlan ? <StudyPlanCard plan={message.studyPlan} /> : message.content ? <MarkdownMessage content={message.content} /> : <p>{isLoading ? <span className="typing">{message.pendingLabel ?? "Thinking"}<span>…</span></span> : "No response received."}</p>}</div></article>
           ))}
           <div ref={threadEndRef} />
         </section>
