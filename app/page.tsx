@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { isSupportedImageType, MAX_IMAGE_BYTES } from "../lib/image-upload";
 
 type LegacyStudyPlan = {
   title: string;
@@ -18,7 +19,7 @@ type TaskSpec = {
   implementationNotes: string[];
 };
 type TaskDraft = { id: string; status: "draft"; createdAt: string; taskSpec: TaskSpec };
-type ChatMessage = { id: string; role: "user" | "assistant"; content: string; studyPlan?: LegacyStudyPlan; taskSpec?: TaskSpec; taskDraft?: TaskDraft };
+type ChatMessage = { id: string; role: "user" | "assistant"; content: string; pendingLabel?: string; studyPlan?: LegacyStudyPlan; taskSpec?: TaskSpec; taskDraft?: TaskDraft };
 type Conversation = { id: string; title: string; updatedAt: number; messages: ChatMessage[] };
 type DraftListItem = { conversationId: string; messageId: string; draft: TaskDraft };
 const STORAGE_KEY = "week-one-ai-chat-conversations";
@@ -101,6 +102,8 @@ export default function Home() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [isSpecMode, setIsSpecMode] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [menuConversationId, setMenuConversationId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [creatingDraftMessageId, setCreatingDraftMessageId] = useState<string | null>(null);
@@ -108,6 +111,7 @@ export default function Home() {
   const [hasHydrated, setHasHydrated] = useState(false);
   const threadEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const activeConversation = useMemo(() => conversations.find((c) => c.id === activeConversationId) ?? null, [activeConversationId, conversations]);
   const messages = activeConversation?.messages ?? [];
   const messageCount = messages.length;
@@ -128,7 +132,34 @@ export default function Home() {
     setActiveConversationId(null);
     setMenuConversationId(null);
     setInput("");
+    clearSelectedImage();
     window.setTimeout(() => inputRef.current?.focus(), 0);
+  }
+
+  function clearSelectedImage() {
+    setSelectedImage(null);
+    setAttachmentError(null);
+    if (imageInputRef.current) imageInputRef.current.value = "";
+  }
+
+  function selectImage(file?: File) {
+    setAttachmentError(null);
+    if (!file) return clearSelectedImage();
+    if (!isSupportedImageType(file.type)) {
+      clearSelectedImage();
+      return setAttachmentError("Use a PNG, JPEG, or WebP screenshot.");
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      clearSelectedImage();
+      return setAttachmentError("Keep the screenshot under 5 MB.");
+    }
+    setSelectedImage(file);
+    setIsSpecMode(true);
+  }
+
+  function toggleSpecMode() {
+    if (isSpecMode) clearSelectedImage();
+    setIsSpecMode((current) => !current);
   }
 
   function updateMessages(conversationId: string, update: (messages: ChatMessage[]) => ChatMessage[]) {
@@ -241,32 +272,39 @@ export default function Home() {
 
   async function createTaskSpec() {
     const request = input.trim();
-    if (!request || isLoading) return;
+    const image = selectedImage;
+    if ((!request && !image) || isLoading) return;
 
-    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: request };
-    const assistantMessage: ChatMessage = { id: crypto.randomUUID(), role: "assistant", content: "" };
+    const userMessageContent = image ? [`Screenshot: ${image.name}`, request].filter(Boolean).join("\n\n") : request;
+    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: userMessageContent };
+    const assistantMessage: ChatMessage = { id: crypto.randomUUID(), role: "assistant", content: "", pendingLabel: image ? "Analyzing screenshot" : "Creating task spec" };
     const existingMessages = activeConversation?.messages ?? [];
     const conversationId = activeConversation?.id ?? crypto.randomUUID();
 
     if (activeConversation) {
       updateMessages(conversationId, () => [...existingMessages, userMessage, assistantMessage]);
     } else {
-      setConversations((current) => [{ id: conversationId, title: request.length > 42 ? `${request.slice(0, 42)}…` : request, updatedAt: Date.now(), messages: [...existingMessages, userMessage, assistantMessage] }, ...current]);
+      const title = request || `Analyze ${image!.name}`;
+      setConversations((current) => [{ id: conversationId, title: title.length > 42 ? `${title.slice(0, 42)}…` : title, updatedAt: Date.now(), messages: [...existingMessages, userMessage, assistantMessage] }, ...current]);
       setActiveConversationId(conversationId);
     }
     setInput("");
+    clearSelectedImage();
     setIsLoading(true);
 
     try {
-      const response = await fetch("/api/task-spec", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request }) });
+      const response = image
+        ? await fetch("/api/task-spec", { method: "POST", body: (() => { const formData = new FormData(); formData.set("request", request); formData.set("image", image); return formData; })() })
+        : await fetch("/api/task-spec", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request }) });
       const payload = await response.json() as { taskSpec?: TaskSpec; error?: string };
       if (!response.ok || !payload.taskSpec) throw new Error(payload.error || "The task specification could not be created.");
-      updateMessages(conversationId, (current) => current.map((message) => message.id === assistantMessage.id ? { ...message, taskSpec: payload.taskSpec } : message));
+      updateMessages(conversationId, (current) => current.map((message) => message.id === assistantMessage.id ? { ...message, pendingLabel: undefined, taskSpec: payload.taskSpec } : message));
     } catch (caughtError) {
       const error = caughtError instanceof Error ? caughtError.message : "Something went wrong.";
       setInput(request);
+      if (image) setSelectedImage(image);
       window.setTimeout(() => inputRef.current?.focus(), 0);
-      updateMessages(conversationId, (current) => current.map((message) => message.id === assistantMessage.id ? { ...message, content: `Sorry, ${error}` } : message));
+      updateMessages(conversationId, (current) => current.map((message) => message.id === assistantMessage.id ? { ...message, pendingLabel: undefined, content: `Sorry, ${error}` } : message));
     } finally { setIsLoading(false); }
   }
 
@@ -295,21 +333,23 @@ export default function Home() {
 
       <section className="chat-panel">
         <header className="topbar">
-          <div className="chat-heading"><details className="learning-status"><summary>WEEK 3 · TOOL CALLING <span className="status-chevron" aria-hidden="true" /></summary><div className="learning-log"><p><strong>Week 1</strong><span>Streaming chat, history, deployment</span></p><p><strong>Week 2</strong><span>JSON schema, Zod validation, editable specs</span></p><p className="current"><strong>Week 3</strong><span>Tool calling, approval, local draft workflow</span></p></div></details><h1>{activeConversation?.title ?? "New conversation"}</h1></div>
+          <div className="chat-heading"><details className="learning-status"><summary>WEEK 4 · VISION INPUT <span className="status-chevron" aria-hidden="true" /></summary><div className="learning-log"><p><strong>Week 1</strong><span>Streaming chat, history, deployment</span></p><p><strong>Week 2</strong><span>JSON schema, Zod validation, editable specs</span></p><p><strong>Week 3</strong><span>Tool calling, approval, local draft workflow</span></p><p className="current"><strong>Week 4</strong><span>Screenshot intake, vision analysis, upload states</span></p></div></details><h1>{activeConversation?.title ?? "New conversation"}</h1></div>
           <span className="model-pill"><span className="status-dot" /> Gemini 3.5 Flash Lite</span>
         </header>
         <section className="thread" aria-live="polite" aria-label="Chat messages">
           {messages.length === 0 ? (
-            <div className="welcome"><span className="welcome-mark">✦</span><h2>How can I help you learn today?</h2><p>This is a real streaming conversation. Ask a question, then follow up and Gemini receives the earlier messages as context.</p><button type="button" className="prompt-chip" onClick={() => setInput("Explain streaming AI responses in a Next.js app using four short sections.")}>Explain streaming responses</button></div>
+            <div className="welcome"><span className="welcome-mark">✦</span><h2>How can I help you learn today?</h2><p>Chat with Gemini, create editable task specs, or attach a product screenshot to turn visible feedback into a reviewed draft workflow.</p><button type="button" className="prompt-chip" onClick={() => setInput("Explain streaming AI responses in a Next.js app using four short sections.")}>Explain streaming responses</button></div>
           ) : messages.map((message) => (
-            <article className={`message ${message.role}`} id={`message-${message.id}`} tabIndex={message.taskDraft ? -1 : undefined} key={message.id}><div className="avatar">{message.role === "user" ? "T" : "✦"}</div><div className="message-body"><p className="message-role">{message.role === "user" ? "You" : "Gemini"}</p>{message.taskSpec ? <TaskSpecCard spec={message.taskSpec} draft={message.taskDraft} isCreatingDraft={creatingDraftMessageId === message.id} onChange={(taskSpec) => updateTaskSpec(activeConversation!.id, message.id, taskSpec)} onCreateDraft={() => createTaskDraft(activeConversation!.id, message.id, message.taskSpec!)} /> : message.studyPlan ? <StudyPlanCard plan={message.studyPlan} /> : message.content ? <MarkdownMessage content={message.content} /> : <p>{isLoading ? <span className="typing">Thinking<span>…</span></span> : "No response received."}</p>}</div></article>
+            <article className={`message ${message.role}`} id={`message-${message.id}`} tabIndex={message.taskDraft ? -1 : undefined} key={message.id}><div className="avatar">{message.role === "user" ? "T" : "✦"}</div><div className="message-body"><p className="message-role">{message.role === "user" ? "You" : "Gemini"}</p>{message.taskSpec ? <TaskSpecCard spec={message.taskSpec} draft={message.taskDraft} isCreatingDraft={creatingDraftMessageId === message.id} onChange={(taskSpec) => updateTaskSpec(activeConversation!.id, message.id, taskSpec)} onCreateDraft={() => createTaskDraft(activeConversation!.id, message.id, message.taskSpec!)} /> : message.studyPlan ? <StudyPlanCard plan={message.studyPlan} /> : message.content ? <MarkdownMessage content={message.content} /> : <p>{isLoading ? <span className="typing">{message.pendingLabel ?? "Thinking"}<span>…</span></span> : "No response received."}</p>}</div></article>
           ))}
           <div ref={threadEndRef} />
         </section>
         <form className="composer" onSubmit={handleSubmit}>
+          {selectedImage && <div className="attachment-preview" aria-live="polite"><span className="attachment-icon" aria-hidden="true">▧</span><span><strong>{selectedImage.name}</strong><small>{(selectedImage.size / 1024 / 1024).toFixed(1)} MB · ready to analyze</small></span><button type="button" onClick={clearSelectedImage} aria-label={`Remove ${selectedImage.name}`}>×</button></div>}
+          {attachmentError && <p className="attachment-error" role="alert">{attachmentError}</p>}
           <label className="sr-only" htmlFor="prompt">Message</label>
-          <textarea ref={inputRef} id="prompt" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={isSpecMode ? "Describe a feature to turn into a task spec…" : "Message Gemini…"} rows={1} disabled={isLoading} />
-          <div className="composer-actions"><button className={`plan-button ${isSpecMode ? "active" : ""}`} type="button" onClick={() => setIsSpecMode((current) => !current)} disabled={isLoading} aria-pressed={isSpecMode} title="Toggle editable task specification mode">Spec</button><button className="send-button" type="submit" disabled={isLoading || !input.trim()} aria-label={isSpecMode ? "Create task specification" : "Send message"}>↑</button></div>
+          <textarea ref={inputRef} id="prompt" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={selectedImage ? "Add optional context for this screenshot…" : isSpecMode ? "Describe a feature to turn into a task spec…" : "Message Gemini…"} rows={1} disabled={isLoading} />
+          <div className="composer-actions"><input ref={imageInputRef} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => selectImage(event.target.files?.[0])} disabled={isLoading} /><button className="attach-button" type="button" onClick={() => imageInputRef.current?.click()} disabled={isLoading} aria-label="Attach product screenshot" title="Attach product screenshot">＋</button><button className={`plan-button ${isSpecMode ? "active" : ""}`} type="button" onClick={toggleSpecMode} disabled={isLoading} aria-pressed={isSpecMode} title="Toggle editable task specification mode">Spec</button><button className="send-button" type="submit" disabled={isLoading || (!input.trim() && !selectedImage)} aria-label={isSpecMode ? "Create task specification" : "Send message"}>↑</button></div>
         </form>
         <p className="disclaimer">Gemini can make mistakes. Do not enter sensitive information while using the free API tier.</p>
       </section>

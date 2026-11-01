@@ -66,3 +66,25 @@ The learning-progress menu now marks **Week 3 · Tool calling** as the current m
 ### Prerequisite
 
 Use the existing `GEMINI_API_KEY`. No database, authentication provider, or additional package is needed for this local draft milestone. Authentication and a persistent task store are required before replacing the local draft function with a real write to an external system.
+
+## Week 4 milestone: screenshot-to-spec intake
+
+Attach a PNG, JPEG, or WebP product screenshot from the composer. The app automatically switches to **Spec** mode, shows the selected-file and processing states, and accepts optional context. `POST /api/task-spec` validates the upload, sends the image and context to Gemini as a multimodal request, and validates the structured result with the same Zod schema used for text requests.
+
+The screenshot is kept only in memory for the request. It is not written to browser storage or a server-side file store. Conversation history keeps the filename, optional context, and resulting editable spec. Draft creation remains a separate, explicit approval step.
+
+### Acceptance criteria
+
+- The composer accepts one PNG, JPEG, or WebP screenshot up to 5 MB.
+- Selecting a screenshot shows its filename, size, ready state, and a remove action.
+- Unsupported, mislabeled, or oversized files are rejected at the API boundary; type and size are also checked in the browser for immediate feedback.
+- Optional context and the screenshot are sent to Gemini in one multimodal request.
+- The generated result must pass the existing task-spec Zod schema before it is rendered.
+- The interface distinguishes ready, analyzing, success, and error states.
+- Screenshots are not persisted in browser history or on the server.
+- The returned spec stays editable and requires the existing approval action before draft creation.
+- Text-only specs, streaming chat, and Week 3 draft management continue to work.
+
+### Prerequisite
+
+Use the existing `GEMINI_API_KEY`. Inline image data keeps this milestone stateless and avoids adding storage or another dependency. A persistent file service is only needed later if screenshots must be reused, shared across devices, or retained for audit history.
