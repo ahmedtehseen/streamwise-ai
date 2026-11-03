@@ -1,9 +1,4 @@
-import {
-  exposeFailedIndexing,
-  indexProjectDocument,
-  ProjectDocumentRecord,
-  publicProjectDocument
-} from "../../../../../../lib/knowledge/indexing";
+import { ProjectDocumentRecord, publicProjectDocument, runProjectDocumentIndexing } from "../../../../../../lib/knowledge/indexing";
 import { createKnowledgeClient, knowledgeConfiguration } from "../../../../../../lib/knowledge/server";
 
 export const runtime = "nodejs";
@@ -29,20 +24,18 @@ export async function POST(
   const indexingDocument = data as RetryProjectDocumentRecord;
 
   try {
-    const readyDocument = await indexProjectDocument(
+    const result = await runProjectDocumentIndexing(
       client,
       indexingDocument.id,
       indexingDocument.original_text,
       indexingDocument.media_type === "text/markdown",
       configuration.geminiApiKey
     );
-    return Response.json({ document: publicProjectDocument(readyDocument as ProjectDocumentRecord) });
-  } catch (indexingError) {
-    try {
-      const failed = await exposeFailedIndexing(client, indexingDocument.id, indexingError);
-      return Response.json({ error: failed.detail, document: publicProjectDocument(failed.document as ProjectDocumentRecord) }, { status: 502 });
-    } catch {
-      return Response.json({ error: "Indexing failed and the Project Document cleanup could not be confirmed." }, { status: 502 });
+    if (result.outcome === "failed") {
+      return Response.json({ error: result.detail, document: publicProjectDocument(result.document as ProjectDocumentRecord) }, { status: 502 });
     }
+    return Response.json({ document: publicProjectDocument(result.document as ProjectDocumentRecord) });
+  } catch {
+    return Response.json({ error: "Indexing failed and the Project Document cleanup could not be confirmed." }, { status: 502 });
   }
 }

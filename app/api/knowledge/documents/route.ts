@@ -1,10 +1,5 @@
 import { createHash } from "node:crypto";
-import {
-  exposeFailedIndexing,
-  indexProjectDocument,
-  ProjectDocumentRecord,
-  publicProjectDocument
-} from "../../../../lib/knowledge/indexing";
+import { ProjectDocumentRecord, publicProjectDocument, runProjectDocumentIndexing } from "../../../../lib/knowledge/indexing";
 import {
   createKnowledgeClient,
   KNOWLEDGE_BASE_ID,
@@ -17,8 +12,13 @@ const MAX_DOCUMENT_BYTES = 500 * 1024;
 
 function mediaTypeFor(file: File) {
   const lowerName = file.name.toLowerCase();
-  if (file.type === "text/markdown" || lowerName.endsWith(".md") || lowerName.endsWith(".markdown")) return "text/markdown";
-  if (file.type === "text/plain" || lowerName.endsWith(".txt")) return "text/plain";
+  const browserType = file.type.toLowerCase();
+  const browserDidNotReportType = browserType === "" || browserType === "application/octet-stream";
+  if (
+    (lowerName.endsWith(".md") || lowerName.endsWith(".markdown"))
+    && (browserDidNotReportType || browserType === "text/markdown" || browserType === "text/plain")
+  ) return "text/markdown";
+  if (lowerName.endsWith(".txt") && (browserDidNotReportType || browserType === "text/plain")) return "text/plain";
   return null;
 }
 
@@ -93,14 +93,12 @@ export async function POST(request: Request) {
   if (insertError || !indexingDocument) return Response.json({ error: "The Project Document could not be saved for indexing." }, { status: 502 });
 
   try {
-    const readyDocument = await indexProjectDocument(client, indexingDocument.id, text, mediaType === "text/markdown", configuration.geminiApiKey);
-    return Response.json({ document: publicProjectDocument(readyDocument as ProjectDocumentRecord) }, { status: 201 });
-  } catch (error) {
-    try {
-      const failed = await exposeFailedIndexing(client, indexingDocument.id, error);
-      return Response.json({ error: failed.detail, document: publicProjectDocument(failed.document as ProjectDocumentRecord) }, { status: 502 });
-    } catch {
-      return Response.json({ error: "Indexing failed and the Project Document cleanup could not be confirmed." }, { status: 502 });
+    const result = await runProjectDocumentIndexing(client, indexingDocument.id, text, mediaType === "text/markdown", configuration.geminiApiKey);
+    if (result.outcome === "failed") {
+      return Response.json({ error: result.detail, document: publicProjectDocument(result.document as ProjectDocumentRecord) }, { status: 502 });
     }
+    return Response.json({ document: publicProjectDocument(result.document as ProjectDocumentRecord) }, { status: 201 });
+  } catch {
+    return Response.json({ error: "Indexing failed and the Project Document cleanup could not be confirmed." }, { status: 502 });
   }
 }

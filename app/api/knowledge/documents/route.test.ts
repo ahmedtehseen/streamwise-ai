@@ -196,6 +196,52 @@ describe("Knowledge Project Document API", () => {
     expect(embeddingRequests.every((body) => body.output_dimensionality === 768 && JSON.stringify(body).includes("Document: "))).toBe(true);
   });
 
+  it("normalizes every stored Project Document embedding to unit length", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      embedding: { values: [3, 4, ...Array.from({ length: 766 }, () => 0)] }
+    })));
+    const formData = new FormData();
+    formData.set("document", new File(["Atlas deployment notes."], "atlas.txt", { type: "text/plain" }));
+
+    const { POST } = await import("./route");
+    const response = await POST(new Request("http://localhost/api/knowledge/documents", { method: "POST", body: formData }));
+
+    expect(response.status).toBe(201);
+    expect(database.completedChunks[0].embedding).toEqual([0.6, 0.8, ...Array.from({ length: 766 }, () => 0)]);
+  });
+
+  it.each([
+    ["notes.md", "text/plain", "text/markdown"],
+    ["notes.markdown", "", "text/markdown"],
+    ["notes.txt", "", "text/plain"]
+  ])("accepts browser-compatible MIME reporting for %s", async (name, browserType, storedType) => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ embedding: { values: [1, ...Array.from({ length: 767 }, () => 0)] } })));
+    const formData = new FormData();
+    formData.set("document", new File(["Project notes"], name, { type: browserType }));
+
+    const { POST } = await import("./route");
+    const response = await POST(new Request("http://localhost/api/knowledge/documents", { method: "POST", body: formData }));
+
+    expect(response.status).toBe(201);
+    expect(database.insertedDocument).toMatchObject({ name, media_type: storedType });
+  });
+
+  it.each([
+    ["notes.md", "application/pdf"],
+    ["notes.txt", "text/markdown"],
+    ["notes.pdf", "text/plain"],
+    ["notes", "text/plain"]
+  ])("rejects incompatible extension and MIME combinations for %s (%s)", async (name, type) => {
+    const formData = new FormData();
+    formData.set("document", new File(["Project notes"], name, { type }));
+
+    const { POST } = await import("./route");
+    const response = await POST(new Request("http://localhost/api/knowledge/documents", { method: "POST", body: formData }));
+
+    expect(response.status).toBe(415);
+    expect(database.insertedDocument).toBeNull();
+  });
+
   it("lists a ready Project Document from durable storage after reload", async () => {
     database.listedDocuments = [{
       id: "document-1",

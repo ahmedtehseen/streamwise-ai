@@ -131,6 +131,8 @@ export default function KnowledgePanel() {
         throw new Error(payload.error || "The Project Document could not be deleted.");
       }
       setDocuments((current) => current.filter((item) => item.id !== document.id));
+      setAnswer(null);
+      setSelectedSource(null);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "The Project Document could not be deleted.");
     } finally {

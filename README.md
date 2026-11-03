@@ -48,7 +48,7 @@ This milestone is intentionally a private, local workflow with one shared Knowle
 
 - Node.js 22.13 or newer and npm.
 - A private Supabase project and a Gemini API key.
-- UTF-8 Markdown (`.md` or `.markdown`, `text/markdown`) and plain text (`.txt`, `text/plain`) are the only accepted formats. Empty, binary-looking, unsupported, and larger-than-500-KB (512,000-byte) uploads are rejected.
+- UTF-8 Markdown (`.md` or `.markdown`, `text/markdown`) and plain text (`.txt`, `text/plain`) are the only accepted formats. The extension is always required and must agree with the reported MIME type. Because browsers may report Markdown as `text/plain`, or may report an empty or generic `application/octet-stream` MIME type for these text extensions, those browser fallbacks are accepted only when the extension is supported. Empty, binary-looking, unsupported, and larger-than-500-KB (512,000-byte) uploads are rejected.
 - The shared Knowledge Base holds at most 20 Project Documents, including indexing and failed records.
 - Every stored vector uses `gemini-embedding-2`, 768 dimensions, `Document: ` for Project Document passages, and `Query: ` for questions. Changing the model, dimension, or prefix convention requires re-indexing every Project Document; vectors produced with different invariants must never be mixed.
 
