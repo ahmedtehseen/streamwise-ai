@@ -9,6 +9,7 @@ type ProjectDocument = {
   byteSize: number;
   status: "indexing" | "ready" | "failed";
   failureDetail: string | null;
+  retryable: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -39,6 +40,7 @@ export default function KnowledgePanel() {
   const [answer, setAnswer] = useState<GroundedAnswer | null>(null);
   const [selectedSource, setSelectedSource] = useState<SourceReference | null>(null);
   const [deletingDocumentIds, setDeletingDocumentIds] = useState<string[]>([]);
+  const [retryingDocumentId, setRetryingDocumentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const hasReadyDocument = documents.some((document) => document.status === "ready");
@@ -69,14 +71,20 @@ export default function KnowledgePanel() {
     const now = new Date().toISOString();
     setError(null);
     setIsUploading(true);
-    setDocuments((current) => [{ id: pendingId, name: file.name, mediaType: file.type, byteSize: file.size, status: "indexing", failureDetail: null, createdAt: now, updatedAt: now }, ...current]);
+    setDocuments((current) => [{ id: pendingId, name: file.name, mediaType: file.type, byteSize: file.size, status: "indexing", failureDetail: null, retryable: false, createdAt: now, updatedAt: now }, ...current]);
 
     try {
       const formData = new FormData();
       formData.set("document", file);
       const response = await fetch("/api/knowledge/documents", { method: "POST", body: formData });
       const payload = await response.json() as { document?: ProjectDocument; error?: string };
-      if (!response.ok || !payload.document) throw new Error(payload.error || "The Project Document could not be indexed.");
+      if (!response.ok) {
+        if (payload.document) setDocuments((current) => current.map((document) => document.id === pendingId ? payload.document! : document));
+        else setDocuments((current) => current.filter((document) => document.id !== pendingId));
+        setError(payload.error || "The Project Document could not be indexed.");
+        return;
+      }
+      if (!payload.document) throw new Error(payload.error || "The Project Document could not be indexed.");
       setDocuments((current) => current.map((document) => document.id === pendingId ? payload.document! : document));
       if (inputRef.current) inputRef.current.value = "";
     } catch (caughtError) {
@@ -130,6 +138,30 @@ export default function KnowledgePanel() {
     }
   }
 
+  async function retryDocument(documentId: string) {
+    if (retryingDocumentId) return;
+    const previousDocument = documents.find((document) => document.id === documentId);
+    setError(null);
+    setRetryingDocumentId(documentId);
+    setDocuments((current) => current.map((document) => document.id === documentId
+      ? { ...document, status: "indexing", failureDetail: null, retryable: false }
+      : document));
+    try {
+      const response = await fetch(`/api/knowledge/documents/${encodeURIComponent(documentId)}/retry`, { method: "POST" });
+      const payload = await response.json() as { document?: ProjectDocument; error?: string };
+      if (payload.document) setDocuments((current) => current.map((document) => document.id === documentId ? payload.document! : document));
+      if (!response.ok || !payload.document) throw new Error(payload.error || "The Project Document could not be retried.");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "The Project Document could not be retried.");
+      const response = await fetch("/api/knowledge/documents");
+      const payload = await response.json() as { documents?: ProjectDocument[] };
+      if (response.ok && payload.documents) setDocuments(payload.documents);
+      else if (previousDocument) setDocuments((current) => current.map((document) => document.id === documentId ? previousDocument : document));
+    } finally {
+      setRetryingDocumentId(null);
+    }
+  }
+
   return (
     <section className="knowledge-panel" aria-labelledby="knowledge-heading">
       <div className="knowledge-intro">
@@ -151,12 +183,17 @@ export default function KnowledgePanel() {
         <ul className="knowledge-list">
           {documents.map((document) => (
             <li key={document.id}>
-              <div className="document-details"><strong>{document.name}</strong><span>{Math.max(1, Math.ceil(document.byteSize / 1024))} KB · {document.mediaType === "text/markdown" ? "Markdown" : "Plain text"}</span></div>
+              <div className="document-details"><strong>{document.name}</strong><span>{Math.max(1, Math.ceil(document.byteSize / 1024))} KB · {document.mediaType === "text/markdown" ? "Markdown" : "Plain text"}</span>{document.status === "failed" && document.failureDetail && <span className="document-failure">{document.failureDetail}</span>}</div>
               <div className="document-actions">
                 <span className={`document-status ${document.status}`}><i aria-hidden="true" />{document.status}</span>
                 {document.status === "ready" && (
                   <button type="button" onClick={() => deleteDocument(document)} disabled={deletingDocumentIds.includes(document.id)}>
                     {deletingDocumentIds.includes(document.id) ? "Deleting…" : "Delete"}
+                  </button>
+                )}
+                {document.status === "failed" && document.retryable && (
+                  <button type="button" onClick={() => retryDocument(document.id)} disabled={retryingDocumentId !== null}>
+                    {retryingDocumentId === document.id ? "Retrying…" : "Retry indexing"}
                   </button>
                 )}
               </div>
