@@ -38,6 +38,25 @@ It uses the existing `GEMINI_API_KEY`; no database, authentication, or new servi
 - Add a character limit before the API request.
 - Notice that the server sends the latest 20 messages to Gemini on each request; this is the basic form of conversational memory.
 
+## Week 5 milestone: first Project Document
+
+Knowledge mode introduces a shared private Knowledge Base backed by Supabase Postgres and pgvector. Upload one Markdown (`.md` or `.markdown`) or plain-text (`.txt`) Project Document up to 500 KB. The interface shows it as indexing while the server splits it at headings and paragraphs, records trustworthy line locators, generates normalized 768-dimensional `gemini-embedding-2` vectors, and atomically changes the durable record to ready after every chunk is stored. Reloading Knowledge mode lists the record from Supabase rather than browser storage.
+
+This milestone is intentionally private and unauthenticated. Do not expose it as a public deployment; per-user ownership and row-level access policies belong to Week 6.
+
+### Setup
+
+1. Create a private Supabase project.
+2. Run `supabase/migrations/202611030001_create_knowledge_base.sql` in the Supabase SQL editor or through your normal Supabase migration workflow.
+3. Copy `.env.example` to `.env.local` and set `GEMINI_API_KEY`, `SUPABASE_URL`, and the server-only `SUPABASE_SERVICE_ROLE_KEY`.
+4. Restart the development server, open **Knowledge**, and upload a Markdown or plain-text document.
+
+Never use the service-role key in a browser component or expose it through a `NEXT_PUBLIC_` variable. The migration enables row-level security without browser policies; the server-only client performs this private workflow.
+
+### Manual smoke test
+
+Upload a short Markdown document with nested headings and a plain-text document with multiple paragraphs. Confirm each moves from indexing to ready, reload the page and confirm both remain listed, then inspect `project_documents` and `document_chunks` in Supabase to verify names, heading paths, line ranges, `gemini-embedding-2`, dimension `768`, and cascading ownership. Real-service question answering, duplicate handling, and deletion arrive in later Week 5 tickets.
+
 ## Week 3 milestone: approved tool calling
 
 Create an editable spec in **Spec** mode, review it, and choose **Create draft task**. That explicit click is the human approval boundary. The server then gives Gemini one declared `create_task_draft` tool and forces a function call. It validates both the approved input and Gemini's tool arguments with the same Zod schema used by spec mode, rejects any model changes, and only then executes the local draft function.
