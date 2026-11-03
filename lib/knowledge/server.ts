@@ -6,6 +6,13 @@ export const KNOWLEDGE_BASE_ID = "00000000-0000-0000-0000-000000000001";
 export const EMBEDDING_MODEL = "gemini-embedding-2";
 export const EMBEDDING_DIMENSION = 768;
 
+export class KnowledgeIndexingError extends Error {
+  constructor(message: string, readonly retryable: boolean) {
+    super(message);
+    this.name = "KnowledgeIndexingError";
+  }
+}
+
 export function knowledgeDatabaseConfiguration() {
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -37,11 +44,19 @@ export async function embedProjectDocumentPassage(text: string, apiKey: string) 
       output_dimensionality: EMBEDDING_DIMENSION
     })
   });
-  if (!response.ok) throw new Error("Gemini could not embed the Project Document.");
+  if (!response.ok) {
+    const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+    throw new KnowledgeIndexingError(
+      retryable
+        ? "Gemini is temporarily unable to embed this Project Document. Try again."
+        : "Gemini rejected this Project Document. Check the Gemini configuration before trying again.",
+      retryable
+    );
+  }
   const payload = await response.json() as { embedding?: { values?: number[] } };
   const embedding = payload.embedding?.values;
   if (!embedding || embedding.length !== EMBEDDING_DIMENSION || embedding.some((value) => !Number.isFinite(value))) {
-    throw new Error("Gemini returned an invalid Project Document embedding.");
+    throw new KnowledgeIndexingError("Gemini returned an invalid Project Document embedding. Retry is unavailable until the provider response is corrected.", false);
   }
   return embedding;
 }
