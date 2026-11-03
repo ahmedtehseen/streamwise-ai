@@ -5,6 +5,7 @@ import Image from "next/image";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { isSupportedImageType, MAX_IMAGE_BYTES } from "../lib/image-upload";
+import KnowledgePanel from "./knowledge-panel";
 
 type LegacyStudyPlan = {
   title: string;
@@ -129,6 +130,7 @@ export default function Home() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [isSpecMode, setIsSpecMode] = useState(false);
+  const [isKnowledgeMode, setIsKnowledgeMode] = useState(false);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [messageImageUrls, setMessageImageUrls] = useState<Record<string, string>>({});
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -201,6 +203,13 @@ export default function Home() {
   function toggleSpecMode() {
     if (isSpecMode) clearSelectedImage();
     setIsSpecMode((current) => !current);
+  }
+
+  function selectMode(mode: "chat" | "spec" | "knowledge") {
+    if (isLoading) return;
+    if (mode !== "spec") clearSelectedImage();
+    setIsKnowledgeMode(mode === "knowledge");
+    setIsSpecMode(mode === "spec");
   }
 
   function updateMessages(conversationId: string, update: (messages: ChatMessage[]) => ChatMessage[]) {
@@ -388,9 +397,10 @@ export default function Home() {
 
       <section className="chat-panel">
         <header className="topbar">
-          <div className="chat-heading"><details className="learning-status"><summary>WEEK 4 · VISION INPUT <span className="status-chevron" aria-hidden="true" /></summary><div className="learning-log"><p><strong>Week 1</strong><span>Streaming chat, history, deployment</span></p><p><strong>Week 2</strong><span>JSON schema, Zod validation, editable specs</span></p><p><strong>Week 3</strong><span>Tool calling, approval, local draft workflow</span></p><p className="current"><strong>Week 4</strong><span>Screenshot intake, vision analysis, upload states</span></p></div></details><h1>{activeConversation?.title ?? "New conversation"}</h1></div>
-          <span className="model-pill"><span className="status-dot" /> Gemini 3.5 Flash Lite</span>
+          <div className="chat-heading"><details className="learning-status"><summary>WEEK 5 · PROJECT KNOWLEDGE <span className="status-chevron" aria-hidden="true" /></summary><div className="learning-log"><p><strong>Week 1</strong><span>Streaming chat, history, deployment</span></p><p><strong>Week 2</strong><span>JSON schema, Zod validation, editable specs</span></p><p><strong>Week 3</strong><span>Tool calling, approval, local draft workflow</span></p><p><strong>Week 4</strong><span>Screenshot intake, vision analysis, upload states</span></p><p className="current"><strong>Week 5</strong><span>Durable Project Documents and embeddings</span></p></div></details><h1>{isKnowledgeMode ? "Knowledge" : activeConversation?.title ?? "New conversation"}</h1></div>
+          <nav className="mode-switch" aria-label="Application mode"><button type="button" className={!isKnowledgeMode && !isSpecMode ? "active" : ""} onClick={() => selectMode("chat")} aria-pressed={!isKnowledgeMode && !isSpecMode}>Chat</button><button type="button" className={!isKnowledgeMode && isSpecMode ? "active" : ""} onClick={() => selectMode("spec")} aria-pressed={!isKnowledgeMode && isSpecMode}>Spec</button><button type="button" className={isKnowledgeMode ? "active" : ""} onClick={() => selectMode("knowledge")} aria-pressed={isKnowledgeMode}>Knowledge</button></nav>
         </header>
+        {isKnowledgeMode ? <KnowledgePanel /> : <>
         <section className="thread" aria-live="polite" aria-label="Chat messages">
           {messages.length === 0 ? (
             <div className="welcome"><span className="welcome-mark">✦</span><h2>How can I help you learn today?</h2><p>Chat with Gemini, create editable task specs, or attach a product screenshot to turn visible feedback into a reviewed draft workflow.</p><button type="button" className="prompt-chip" onClick={() => setInput("Explain streaming AI responses in a Next.js app using four short sections.")}>Explain streaming responses</button></div>
@@ -407,6 +417,7 @@ export default function Home() {
           <div className="composer-actions"><input ref={imageInputRef} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => selectImage(event.target.files?.[0])} disabled={isLoading} /><button className="attach-button" type="button" onClick={() => imageInputRef.current?.click()} disabled={isLoading} aria-label="Attach product screenshot" title="Attach product screenshot">＋</button><button className={`plan-button ${isSpecMode ? "active" : ""}`} type="button" onClick={toggleSpecMode} disabled={isLoading} aria-pressed={isSpecMode} title="Toggle editable task specification mode">Spec</button><button className="send-button" type="submit" disabled={isLoading || (!input.trim() && !selectedImage)} aria-label={isSpecMode ? "Create task specification" : "Send message"}>↑</button></div>
         </form>
         <p className="disclaimer">Gemini can make mistakes. Do not enter sensitive information while using the free API tier.</p>
+        </>}
       </section>
     </main>
   );
