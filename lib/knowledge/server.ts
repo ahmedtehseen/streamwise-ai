@@ -51,6 +51,38 @@ function geminiFailure(response: Response, operation: "embed" | "answer") {
   );
 }
 
+type EmbeddingErrorPolicy = {
+  prefix: "Document" | "Query";
+  responseFailure: (response: Response) => Error;
+  invalidEmbedding: () => Error;
+};
+
+async function requestEmbedding(value: string, apiKey: string, policy: EmbeddingErrorPolicy) {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${EMBEDDING_MODEL}:embedContent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+    body: JSON.stringify({
+      content: { parts: [{ text: `${policy.prefix}: ${value}` }] },
+      output_dimensionality: EMBEDDING_DIMENSION
+    })
+  });
+  if (!response.ok) throw policy.responseFailure(response);
+
+  let embedding: number[] | undefined;
+  try {
+    const payload = await response.json() as { embedding?: { values?: number[] } };
+    embedding = payload.embedding?.values;
+  } catch {
+    throw policy.invalidEmbedding();
+  }
+  if (!embedding || embedding.length !== EMBEDDING_DIMENSION || embedding.some((item) => !Number.isFinite(item))) {
+    throw policy.invalidEmbedding();
+  }
+  const magnitude = Math.hypot(...embedding);
+  if (!Number.isFinite(magnitude) || magnitude === 0) throw policy.invalidEmbedding();
+  return embedding.map((item) => item / magnitude);
+}
+
 export function knowledgeDatabaseConfiguration() {
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -74,47 +106,30 @@ export function createKnowledgeClient(supabaseUrl: string, serviceRoleKey: strin
 }
 
 export async function embedProjectDocumentPassage(text: string, apiKey: string) {
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${EMBEDDING_MODEL}:embedContent`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-    body: JSON.stringify({
-      content: { parts: [{ text: `Document: ${text}` }] },
-      output_dimensionality: EMBEDDING_DIMENSION
-    })
+  return requestEmbedding(text, apiKey, {
+    prefix: "Document",
+    responseFailure: (response) => {
+      const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+      return new KnowledgeIndexingError(
+        retryable
+          ? "Gemini is temporarily unable to embed this Project Document. Try again."
+          : "Gemini rejected this Project Document. Check the Gemini configuration before trying again.",
+        retryable
+      );
+    },
+    invalidEmbedding: () => new KnowledgeIndexingError(
+      "Gemini returned an invalid Project Document embedding. Retry is unavailable until the provider response is corrected.",
+      false
+    )
   });
-  if (!response.ok) {
-    const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
-    throw new KnowledgeIndexingError(
-      retryable
-        ? "Gemini is temporarily unable to embed this Project Document. Try again."
-        : "Gemini rejected this Project Document. Check the Gemini configuration before trying again.",
-      retryable
-    );
-  }
-  const payload = await response.json() as { embedding?: { values?: number[] } };
-  const embedding = payload.embedding?.values;
-  if (!embedding || embedding.length !== EMBEDDING_DIMENSION || embedding.some((value) => !Number.isFinite(value))) {
-    throw new KnowledgeIndexingError("Gemini returned an invalid Project Document embedding. Retry is unavailable until the provider response is corrected.", false);
-  }
-  return embedding;
 }
 
 export async function embedProjectQuestion(question: string, apiKey: string) {
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${EMBEDDING_MODEL}:embedContent`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-    body: JSON.stringify({
-      content: { parts: [{ text: `Query: ${question}` }] },
-      output_dimensionality: EMBEDDING_DIMENSION
-    })
+  return requestEmbedding(question, apiKey, {
+    prefix: "Query",
+    responseFailure: (response) => geminiFailure(response, "embed"),
+    invalidEmbedding: () => new KnowledgeError("Gemini returned an invalid question embedding.", "invalid_model_output", false, 502)
   });
-  if (!response.ok) throw geminiFailure(response, "embed");
-  const payload = await response.json() as { embedding?: { values?: number[] } };
-  const embedding = payload.embedding?.values;
-  if (!embedding || embedding.length !== EMBEDDING_DIMENSION || embedding.some((value) => !Number.isFinite(value))) {
-    throw new KnowledgeError("Gemini returned an invalid question embedding.", "invalid_model_output", false, 502);
-  }
-  return embedding;
 }
 
 const groundedAnswerSchema = z.discriminatedUnion("outcome", [

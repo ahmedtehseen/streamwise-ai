@@ -125,12 +125,13 @@ function TaskSpecCard({ spec, draft, isCreatingDraft, onChange, onCreateDraft }:
   );
 }
 
+type ApplicationMode = "chat" | "spec" | "knowledge";
+
 export default function Home() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [input, setInput] = useState("");
-  const [isSpecMode, setIsSpecMode] = useState(false);
-  const [isKnowledgeMode, setIsKnowledgeMode] = useState(false);
+  const [mode, setMode] = useState<ApplicationMode>("chat");
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [messageImageUrls, setMessageImageUrls] = useState<Record<string, string>>({});
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -188,7 +189,7 @@ export default function Home() {
       return setAttachmentError("Keep the screenshot under 5 MB.");
     }
     setSelectedImage(file);
-    setIsSpecMode(true);
+    setMode("spec");
   }
 
   function pasteImage(event: ReactClipboardEvent<HTMLTextAreaElement>) {
@@ -201,15 +202,14 @@ export default function Home() {
   }
 
   function toggleSpecMode() {
-    if (isSpecMode) clearSelectedImage();
-    setIsSpecMode((current) => !current);
+    if (mode === "spec") clearSelectedImage();
+    setMode((current) => current === "spec" ? "chat" : "spec");
   }
 
-  function selectMode(mode: "chat" | "spec" | "knowledge") {
+  function selectMode(nextMode: ApplicationMode) {
     if (isLoading) return;
-    if (mode !== "spec") clearSelectedImage();
-    setIsKnowledgeMode(mode === "knowledge");
-    setIsSpecMode(mode === "spec");
+    if (nextMode !== "spec") clearSelectedImage();
+    setMode(nextMode);
   }
 
   function updateMessages(conversationId: string, update: (messages: ChatMessage[]) => ChatMessage[]) {
@@ -247,7 +247,7 @@ export default function Home() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (isSpecMode) return createTaskSpec();
+    if (mode === "spec") return createTaskSpec();
     const text = input.trim();
     if (!text || isLoading) return;
 
@@ -397,10 +397,10 @@ export default function Home() {
 
       <section className="chat-panel">
         <header className="topbar">
-          <div className="chat-heading"><details className="learning-status"><summary>WEEK 5 · PROJECT KNOWLEDGE <span className="status-chevron" aria-hidden="true" /></summary><div className="learning-log"><p><strong>Week 1</strong><span>Streaming chat, history, deployment</span></p><p><strong>Week 2</strong><span>JSON schema, Zod validation, editable specs</span></p><p><strong>Week 3</strong><span>Tool calling, approval, local draft workflow</span></p><p><strong>Week 4</strong><span>Screenshot intake, vision analysis, upload states</span></p><p className="current"><strong>Week 5</strong><span>Durable Project Documents and embeddings</span></p></div></details><h1>{isKnowledgeMode ? "Knowledge" : activeConversation?.title ?? "New conversation"}</h1></div>
-          <nav className="mode-switch" aria-label="Application mode"><button type="button" className={!isKnowledgeMode && !isSpecMode ? "active" : ""} onClick={() => selectMode("chat")} aria-pressed={!isKnowledgeMode && !isSpecMode}>Chat</button><button type="button" className={!isKnowledgeMode && isSpecMode ? "active" : ""} onClick={() => selectMode("spec")} aria-pressed={!isKnowledgeMode && isSpecMode}>Spec</button><button type="button" className={isKnowledgeMode ? "active" : ""} onClick={() => selectMode("knowledge")} aria-pressed={isKnowledgeMode}>Knowledge</button></nav>
+          <div className="chat-heading"><details className="learning-status"><summary>WEEK 5 · PROJECT KNOWLEDGE <span className="status-chevron" aria-hidden="true" /></summary><div className="learning-log"><p><strong>Week 1</strong><span>Streaming chat, history, deployment</span></p><p><strong>Week 2</strong><span>JSON schema, Zod validation, editable specs</span></p><p><strong>Week 3</strong><span>Tool calling, approval, local draft workflow</span></p><p><strong>Week 4</strong><span>Screenshot intake, vision analysis, upload states</span></p><p className="current"><strong>Week 5</strong><span>Durable Project Documents and embeddings</span></p></div></details><h1>{mode === "knowledge" ? "Knowledge" : activeConversation?.title ?? "New conversation"}</h1></div>
+          <nav className="mode-switch" aria-label="Application mode"><button type="button" className={mode === "chat" ? "active" : ""} onClick={() => selectMode("chat")} aria-pressed={mode === "chat"}>Chat</button><button type="button" className={mode === "spec" ? "active" : ""} onClick={() => selectMode("spec")} aria-pressed={mode === "spec"}>Spec</button><button type="button" className={mode === "knowledge" ? "active" : ""} onClick={() => selectMode("knowledge")} aria-pressed={mode === "knowledge"}>Knowledge</button></nav>
         </header>
-        {isKnowledgeMode ? <KnowledgePanel /> : <>
+        {mode === "knowledge" ? <KnowledgePanel /> : <>
         <section className="thread" aria-live="polite" aria-label="Chat messages">
           {messages.length === 0 ? (
             <div className="welcome"><span className="welcome-mark">✦</span><h2>How can I help you learn today?</h2><p>Chat with Gemini, create editable task specs, or attach a product screenshot to turn visible feedback into a reviewed draft workflow.</p><button type="button" className="prompt-chip" onClick={() => setInput("Explain streaming AI responses in a Next.js app using four short sections.")}>Explain streaming responses</button></div>
@@ -413,8 +413,8 @@ export default function Home() {
           {selectedImage && imagePreviewUrl && <div className="attachment-preview" aria-live="polite"><Image className="attachment-thumbnail" src={imagePreviewUrl} alt={`Preview of ${selectedImage.name}`} width={48} height={48} unoptimized /><span><strong>{selectedImage.name}</strong><small>{(selectedImage.size / 1024 / 1024).toFixed(1)} MB · ready to analyze</small></span><button type="button" onClick={clearSelectedImage} aria-label={`Remove ${selectedImage.name}`}>×</button></div>}
           {attachmentError && <p className="attachment-error" role="alert">{attachmentError}</p>}
           <label className="sr-only" htmlFor="prompt">Message</label>
-          <textarea ref={inputRef} id="prompt" value={input} onChange={(event) => setInput(event.target.value)} onPaste={pasteImage} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={selectedImage ? "Add optional context for this screenshot…" : isSpecMode ? "Describe a feature to turn into a task spec…" : "Message Gemini…"} rows={1} disabled={isLoading} />
-          <div className="composer-actions"><input ref={imageInputRef} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => selectImage(event.target.files?.[0])} disabled={isLoading} /><button className="attach-button" type="button" onClick={() => imageInputRef.current?.click()} disabled={isLoading} aria-label="Attach product screenshot" title="Attach product screenshot">＋</button><button className={`plan-button ${isSpecMode ? "active" : ""}`} type="button" onClick={toggleSpecMode} disabled={isLoading} aria-pressed={isSpecMode} title="Toggle editable task specification mode">Spec</button><button className="send-button" type="submit" disabled={isLoading || (!input.trim() && !selectedImage)} aria-label={isSpecMode ? "Create task specification" : "Send message"}>↑</button></div>
+          <textarea ref={inputRef} id="prompt" value={input} onChange={(event) => setInput(event.target.value)} onPaste={pasteImage} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={selectedImage ? "Add optional context for this screenshot…" : mode === "spec" ? "Describe a feature to turn into a task spec…" : "Message Gemini…"} rows={1} disabled={isLoading} />
+          <div className="composer-actions"><input ref={imageInputRef} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => selectImage(event.target.files?.[0])} disabled={isLoading} /><button className="attach-button" type="button" onClick={() => imageInputRef.current?.click()} disabled={isLoading} aria-label="Attach product screenshot" title="Attach product screenshot">＋</button><button className={`plan-button ${mode === "spec" ? "active" : ""}`} type="button" onClick={toggleSpecMode} disabled={isLoading} aria-pressed={mode === "spec"} title="Toggle editable task specification mode">Spec</button><button className="send-button" type="submit" disabled={isLoading || (!input.trim() && !selectedImage)} aria-label={mode === "spec" ? "Create task specification" : "Send message"}>↑</button></div>
         </form>
         <p className="disclaimer">Gemini can make mistakes. Do not enter sensitive information while using the free API tier.</p>
         </>}

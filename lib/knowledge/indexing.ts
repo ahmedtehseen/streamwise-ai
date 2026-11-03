@@ -38,7 +38,7 @@ export function publicProjectDocument(document: ProjectDocumentRecord) {
   };
 }
 
-export async function indexProjectDocument(
+async function indexProjectDocument(
   client: KnowledgeClient,
   documentId: string,
   text: string,
@@ -74,7 +74,7 @@ export async function indexProjectDocument(
   return data;
 }
 
-export async function exposeFailedIndexing(
+async function exposeFailedIndexing(
   client: KnowledgeClient,
   documentId: string,
   error: unknown
@@ -88,4 +88,20 @@ export async function exposeFailedIndexing(
   });
   if (failureError || !data) throw new Error("Indexing failed and the Project Document cleanup could not be confirmed.");
   return { detail, document: data };
+}
+
+export async function runProjectDocumentIndexing(
+  client: KnowledgeClient,
+  documentId: string,
+  text: string,
+  markdown: boolean,
+  geminiApiKey: string
+) {
+  try {
+    const document = await indexProjectDocument(client, documentId, text, markdown, geminiApiKey);
+    return { outcome: "ready" as const, document };
+  } catch (error) {
+    const failed = await exposeFailedIndexing(client, documentId, error);
+    return { outcome: "failed" as const, ...failed };
+  }
 }

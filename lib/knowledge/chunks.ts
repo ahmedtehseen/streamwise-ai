@@ -10,6 +10,14 @@ export type ProjectDocumentChunk = {
 
 type Block = ProjectDocumentChunk;
 
+function lineAtOffset(text: string, offset: number, firstLine: number) {
+  let line = firstLine;
+  for (let index = 0; index < offset; index += 1) {
+    if (text[index] === "\n") line += 1;
+  }
+  return line;
+}
+
 function splitLongBlock(block: Block): Block[] {
   if (block.text.length <= MAX_CHUNK_CHARACTERS) return [block];
 
@@ -19,7 +27,16 @@ function splitLongBlock(block: Block): Block[] {
     const proposedEnd = Math.min(start + MAX_CHUNK_CHARACTERS, block.text.length);
     const whitespace = proposedEnd < block.text.length ? block.text.lastIndexOf(" ", proposedEnd) : proposedEnd;
     const end = whitespace > start + CHUNK_OVERLAP_CHARACTERS ? whitespace : proposedEnd;
-    chunks.push({ ...block, text: block.text.slice(start, end).trim() });
+    let trimmedStart = start;
+    let trimmedEnd = end;
+    while (trimmedStart < trimmedEnd && /\s/.test(block.text[trimmedStart])) trimmedStart += 1;
+    while (trimmedEnd > trimmedStart && /\s/.test(block.text[trimmedEnd - 1])) trimmedEnd -= 1;
+    chunks.push({
+      ...block,
+      text: block.text.slice(trimmedStart, trimmedEnd),
+      startLine: lineAtOffset(block.text, trimmedStart, block.startLine),
+      endLine: lineAtOffset(block.text, Math.max(trimmedStart, trimmedEnd - 1), block.startLine)
+    });
     if (end >= block.text.length) break;
     start = Math.max(end - CHUNK_OVERLAP_CHARACTERS, start + 1);
   }

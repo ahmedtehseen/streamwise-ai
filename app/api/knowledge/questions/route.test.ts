@@ -154,6 +154,21 @@ describe("Project Knowledge Assistant question API", () => {
     expect(answerPrompt).not.toContain("non-ready passage");
   });
 
+  it("normalizes the query embedding to unit length before retrieval", async () => {
+    readyChunk();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes(":embedContent")) {
+        return Response.json({ embedding: { values: [3, 4, ...Array.from({ length: 766 }, () => 0)] } });
+      }
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ outcome: "insufficient_evidence", paragraphs: [] }) }] } }] });
+    }));
+
+    const response = await ask();
+
+    expect(response.status).toBe(200);
+    expect(database.rpcCalls[0].parameters.p_query_embedding).toEqual([0.6, 0.8, ...Array.from({ length: 766 }, () => 0)]);
+  });
+
   function readyChunk(text = "Atlas deployments happen on Fridays.") {
     database.readyDocumentCount = 1;
     database.storedChunks = [{
@@ -318,7 +333,7 @@ describe("Project Knowledge Assistant question API", () => {
   it("reports a retrieval failure without generating an answer", async () => {
     readyChunk();
     database.retrievalError = { message: "rpc unavailable" };
-    const provider = vi.fn(async () => Response.json({ embedding: { values: Array.from({ length: 768 }, () => 0) } }));
+    const provider = vi.fn(async () => Response.json({ embedding: { values: [1, ...Array.from({ length: 767 }, () => 0)] } }));
     vi.stubGlobal("fetch", provider);
 
     const response = await ask();
