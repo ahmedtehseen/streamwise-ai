@@ -10,7 +10,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "migrations:validate": "node scripts/validate-migrations.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",

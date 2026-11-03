@@ -40,22 +40,96 @@ It uses the existing `GEMINI_API_KEY`; no database, authentication, or new servi
 
 ## Week 5 milestone: Grounded Answers
 
-Knowledge mode introduces a shared private Knowledge Base backed by Supabase Postgres and pgvector. Upload one Markdown (`.md` or `.markdown`) or plain-text (`.txt`) Project Document up to 500 KB. After a document is ready, ask a project question to retrieve the five closest ready passages and receive a structured Grounded Answer. Select any Source Reference to inspect its trusted document name, heading path, line range, and stored excerpt.
+Knowledge mode introduces a shared private Knowledge Base backed by Supabase Postgres and pgvector. After a Project Document is ready, a question retrieves the five closest ready passages and returns either a structured Grounded Answer or Insufficient Evidence. Select a Source Reference to inspect its trusted document name, heading path, line range, and stored excerpt.
 
-This milestone is intentionally private and unauthenticated. Do not expose it as a public deployment; per-user ownership and row-level access policies belong to Week 6.
+This milestone is intentionally a private, local workflow with one shared Knowledge Base. It has no authentication, user ownership, or document permissions. Do not expose Knowledge mode publicly; those access boundaries belong to Week 6.
 
-### Setup
+### Requirements and limits
 
-1. Create a private Supabase project.
-2. Run the versioned SQL files in `supabase/migrations` in filename order through the Supabase SQL editor or your normal migration workflow.
-3. Copy `.env.example` to `.env.local` and set `GEMINI_API_KEY`, `SUPABASE_URL`, and the server-only `SUPABASE_SERVICE_ROLE_KEY`.
-4. Restart the development server, open **Knowledge**, and upload a Markdown or plain-text document.
+- Node.js 22.13 or newer and npm.
+- A private Supabase project and a Gemini API key.
+- UTF-8 Markdown (`.md` or `.markdown`, `text/markdown`) and plain text (`.txt`, `text/plain`) are the only accepted formats. Empty, binary-looking, unsupported, and larger-than-500-KB (512,000-byte) uploads are rejected.
+- The shared Knowledge Base holds at most 20 Project Documents, including indexing and failed records.
+- Every stored vector uses `gemini-embedding-2`, 768 dimensions, `Document: ` for Project Document passages, and `Query: ` for questions. Changing the model, dimension, or prefix convention requires re-indexing every Project Document; vectors produced with different invariants must never be mixed.
 
-Never use the service-role key in a browser component or expose it through a `NEXT_PUBLIC_` variable. The migration enables row-level security without browser policies; the server-only client performs this private workflow.
+### Fresh-checkout setup
 
-### Manual smoke test
+1. Use Node.js 22.13 or newer and install exactly the locked dependencies with `npm ci`.
+2. Create a private Supabase project. In its SQL editor, apply every file under `supabase/migrations` once, in filename order. The files are append-only, uniquely versioned schema history; do not combine, reorder, or edit an already-applied migration.
+3. Run `npm run migrations:validate`. This verifies local migration order and the required pgvector, security, lifecycle, retrieval, and embedding invariants.
+4. In the Supabase SQL editor, run `supabase/verify_knowledge_schema.sql` after the migrations. Every value in its single result row must be `true`. This confirms the applied database, not only the checked-in files.
+5. Copy `.env.example` (or `.env.local.example`) to `.env.local` and set all three server values:
+   - `GEMINI_API_KEY`: a Gemini API key allowed to call the embedding and answer models.
+   - `SUPABASE_URL`: the project URL from Supabase **Project Settings → API**.
+   - `SUPABASE_SERVICE_ROLE_KEY`: the project's service-role secret from the same settings page. This is privileged and server-only.
+6. Run `npm run dev`, visit `http://localhost:3000`, and open **Knowledge**.
 
-Upload a short Markdown document with nested headings and a plain-text document with multiple paragraphs. Confirm each moves from indexing to ready, then ask a question supported by one passage. Verify the answer cites the correct document and lines and that selecting the Source Reference reveals the stored excerpt. Ask a question the documents do not support and confirm no general-knowledge answer is shown. Inspect `project_documents` and `document_chunks` in Supabase to verify names, heading paths, line ranges, `gemini-embedding-2`, and dimension `768`.
+Never commit `.env.local`, print secrets into logs or screenshots, use the service-role key in a browser component, or expose it through a `NEXT_PUBLIC_` variable. The migrations enable row-level security without browser policies; only the server-side client performs this private workflow.
+
+### Real-service smoke test
+
+Perform this procedure against the configured private Supabase project and Gemini API. It deliberately exercises the visible integrated states as well as the two external services.
+
+1. Start with an empty Knowledge Base. If it contains disposable smoke data, delete that data through the interface. Reload Knowledge and confirm **Loading the Knowledge Base…** resolves to the empty state.
+2. Save and upload `atlas.md` with the exact content below. Observe **indexing**, then **ready**.
+
+   ```markdown
+   # Atlas
+
+   ## Release schedule
+
+   Atlas production deployments happen every Friday.
+   Release review begins at 14:00 UTC.
+   ```
+
+3. Save and upload `operations.txt` with the exact content below. Observe **indexing**, then **ready**.
+
+   ```text
+   The Atlas incident commander is the on-call platform engineer.
+
+   Customer status updates are posted every thirty minutes during an incident.
+   ```
+
+4. Ask: `When does Atlas deploy and when does release review begin?` Observe **Searching…**, then a Grounded Answer. Confirm every factual paragraph has a Source Reference to `atlas.md`; select it and verify the heading path, line range, and stored excerpt are shown.
+5. Ask: `What is Atlas's annual infrastructure budget?` Confirm the result is **Insufficient Evidence** and contains neither guessed answer text nor Source References.
+6. Upload the unchanged `atlas.md` again (renaming it is allowed, changing its bytes is not). Confirm duplicate content is rejected and no second Project Document appears.
+7. Exercise a recoverable failure using the real database without relying on an unpredictable provider outage. In the Supabase SQL editor, run the statement below, then reload Knowledge. Confirm `operations.txt` is **failed**, its detail is visible, and **Retry indexing** is offered.
+
+   ```sql
+   update public.project_documents
+   set status = 'failed',
+       failure_detail = 'Manual transient failure for the Week 5 smoke test.',
+       failure_retryable = true,
+       updated_at = now()
+   where name = 'operations.txt' and status = 'ready';
+   ```
+
+8. Choose **Retry indexing**. Observe **Retrying…**/**indexing**, then **ready**. This retry removes prior chunks, calls the real Gemini embedding service again, and completes through the real Supabase lifecycle functions.
+9. In Supabase, copy the `id` returned by `select id from public.project_documents where name = 'operations.txt';`. Delete `operations.txt` in the interface and confirm it disappears. Replace `<copied-id>` below and confirm this read-only query returns `0`, proving cascading chunk deletion:
+
+   ```sql
+   select count(*)
+   from public.document_chunks as chunk
+   where project_document_id = '<copied-id>'::uuid;
+   ```
+
+10. Switch to **Chat**, send a simple prompt, and confirm the streaming answer completes. Switch to **Spec**, generate a text-only specification, and confirm the editable structured result still appears. Return to **Knowledge** and confirm its Project Document list remains intact.
+
+The smoke test is complete only when steps 1–10 pass. If the three external values are unavailable, report the missing credentials as the sole omitted verification; lint, controlled tests, build, and local migration validation must still pass.
+
+### Verification from a clean checkout
+
+Run these commands with Node.js 22.13 or newer:
+
+```sh
+npm ci
+npm run migrations:validate
+npm run lint
+npm test
+npm run build
+```
+
+The controlled suite covers upload/list/delete/retry behavior, formats and limits, duplicate and capacity enforcement, chunk/source locators, ready-only retrieval, Grounded Answers, Insufficient Evidence, invalid citations, untrusted instructions, and explicit provider/database failures. The real-service procedure above is still required because controlled boundaries cannot prove that the current Gemini and Supabase services interoperate.
 
 ## Week 3 milestone: approved tool calling
 
