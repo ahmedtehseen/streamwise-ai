@@ -4,6 +4,7 @@ import {
   EMBEDDING_MODEL,
   embedProjectQuestion,
   generateGroundedAnswer,
+  KnowledgeError,
   knowledgeConfiguration
 } from "../../../../lib/knowledge/server";
 import { z } from "zod";
@@ -19,6 +20,10 @@ const matchedChunkSchema = z.object({
   end_line: z.number().int().positive(),
   cosine_distance: z.number()
 });
+
+function failure(error: string, code: string, retryable: boolean, status: number) {
+  return Response.json({ error, code, retryable }, { status });
+}
 
 export async function POST(request: Request) {
   let configuration: ReturnType<typeof knowledgeConfiguration>;
@@ -38,7 +43,7 @@ export async function POST(request: Request) {
     .from("project_documents")
     .select("*", { count: "exact", head: true })
     .eq("status", "ready");
-  if (error) return Response.json({ error: "The Knowledge Base could not be checked." }, { status: 502 });
+  if (error) return failure("The Knowledge Base could not be checked.", "database_unavailable", true, 503);
   if (!count) {
     return Response.json({ error: "Index at least one Project Document before asking a question." }, { status: 409 });
   }
@@ -52,7 +57,7 @@ export async function POST(request: Request) {
       p_embedding_model: EMBEDDING_MODEL,
       p_embedding_dimension: EMBEDDING_DIMENSION
     });
-    if (matchError) return Response.json({ error: "The Knowledge Base could not be searched." }, { status: 502 });
+    if (matchError) return failure("The Knowledge Base could not be searched.", "retrieval_unavailable", true, 503);
     const matchedChunks = z.array(matchedChunkSchema).parse(data);
     const evidence = matchedChunks.map((chunk, index) => ({ id: `source-${index + 1}`, text: chunk.text }));
     const answer = await generateGroundedAnswer(question, evidence, configuration.geminiApiKey);
@@ -61,23 +66,38 @@ export async function POST(request: Request) {
     }
 
     const sources = new Map(matchedChunks.map((chunk, index) => [`source-${index + 1}`, chunk]));
-    const paragraphs = answer.paragraphs.map((paragraph) => ({
-      text: paragraph.text,
-      sourceReferences: [...new Set(paragraph.chunkIds)].map((id) => {
-        const chunk = sources.get(id);
-        if (!chunk) throw new Error("Gemini cited a passage that was not retrieved.");
-        return {
-          id,
-          documentName: chunk.document_name,
-          headingPath: chunk.heading_path,
-          startLine: chunk.start_line,
-          endLine: chunk.end_line,
-          excerpt: chunk.text
-        };
-      })
-    }));
+    const paragraphs = answer.paragraphs.map((paragraph) => {
+      if (paragraph.chunkIds.length === 0) {
+        throw new KnowledgeError(
+          "Gemini returned a Grounded Answer without a Source Reference for every paragraph.",
+          "invalid_model_output",
+          false,
+          502
+        );
+      }
+      return {
+        text: paragraph.text,
+        sourceReferences: [...new Set(paragraph.chunkIds)].map((id) => {
+          const chunk = sources.get(id);
+          if (!chunk) {
+            throw new KnowledgeError("Gemini cited a passage that was not retrieved.", "invalid_model_output", false, 502);
+          }
+          return {
+            id,
+            documentName: chunk.document_name,
+            headingPath: chunk.heading_path,
+            startLine: chunk.start_line,
+            endLine: chunk.end_line,
+            excerpt: chunk.text
+          };
+        })
+      };
+    });
     return Response.json({ outcome: "answered", paragraphs });
   } catch (error) {
+    if (error instanceof KnowledgeError) {
+      return failure(error.message, error.code, error.retryable, error.status);
+    }
     return Response.json({ error: error instanceof Error ? error.message : "A Grounded Answer could not be generated." }, { status: 502 });
   }
 }
