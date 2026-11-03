@@ -13,12 +13,34 @@ type ProjectDocument = {
   updatedAt: string;
 };
 
+type SourceReference = {
+  id: string;
+  documentName: string;
+  headingPath: string[];
+  startLine: number;
+  endLine: number;
+  excerpt: string;
+};
+
+type GroundedAnswer = {
+  outcome: "answered";
+  paragraphs: Array<{ text: string; sourceReferences: SourceReference[] }>;
+} | {
+  outcome: "insufficient_evidence";
+  paragraphs: [];
+};
+
 export default function KnowledgePanel() {
   const [documents, setDocuments] = useState<ProjectDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const [question, setQuestion] = useState("");
+  const [isAsking, setIsAsking] = useState(false);
+  const [answer, setAnswer] = useState<GroundedAnswer | null>(null);
+  const [selectedSource, setSelectedSource] = useState<SourceReference | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const hasReadyDocument = documents.some((document) => document.status === "ready");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -64,6 +86,31 @@ export default function KnowledgePanel() {
     }
   }
 
+  async function askQuestion(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!question.trim() || !hasReadyDocument || isAsking) return;
+    setError(null);
+    setAnswer(null);
+    setSelectedSource(null);
+    setIsAsking(true);
+    try {
+      const response = await fetch("/api/knowledge/questions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: question.trim() })
+      });
+      const payload = await response.json() as GroundedAnswer | { error?: string };
+      if (!response.ok || !("outcome" in payload)) {
+        throw new Error("error" in payload && payload.error ? payload.error : "A Grounded Answer could not be generated.");
+      }
+      setAnswer(payload);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "A Grounded Answer could not be generated.");
+    } finally {
+      setIsAsking(false);
+    }
+  }
+
   return (
     <section className="knowledge-panel" aria-labelledby="knowledge-heading">
       <div className="knowledge-intro">
@@ -90,6 +137,37 @@ export default function KnowledgePanel() {
             </li>
           ))}
         </ul>
+      )}
+      <div className="knowledge-list-heading"><h3>Ask project knowledge</h3></div>
+      <form className="knowledge-question" onSubmit={askQuestion}>
+        <label htmlFor="knowledge-question">Project question</label>
+        <textarea id="knowledge-question" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder={hasReadyDocument ? "Ask a question supported by your Project Documents" : "Index a Project Document before asking a question"} disabled={!hasReadyDocument || isAsking} rows={3} required />
+        <button type="submit" disabled={!hasReadyDocument || !question.trim() || isAsking}>{isAsking ? "Searching…" : "Ask for a Grounded Answer"}</button>
+      </form>
+      {answer?.outcome === "insufficient_evidence" && <p className="knowledge-empty">The Knowledge Base does not contain enough evidence to answer that question.</p>}
+      {answer?.outcome === "answered" && (
+        <article className="grounded-answer" aria-live="polite">
+          <p className="eyebrow">GROUNDED ANSWER</p>
+          {answer.paragraphs.map((paragraph, paragraphIndex) => (
+            <div className="answer-paragraph" key={`${paragraphIndex}-${paragraph.text}`}>
+              <p>{paragraph.text}</p>
+              <div className="source-reference-list" aria-label="Source References">
+                {paragraph.sourceReferences.map((source) => (
+                  <button type="button" key={`${paragraphIndex}-${source.id}`} className={selectedSource?.id === source.id ? "selected" : ""} aria-pressed={selectedSource?.id === source.id} onClick={() => setSelectedSource(source)}>
+                    {source.documentName} · lines {source.startLine}–{source.endLine}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          {selectedSource && (
+            <aside className="source-excerpt" aria-live="polite">
+              <strong>{selectedSource.documentName} · lines {selectedSource.startLine}–{selectedSource.endLine}</strong>
+              {selectedSource.headingPath.length > 0 && <span>{selectedSource.headingPath.join(" › ")}</span>}
+              <blockquote>{selectedSource.excerpt}</blockquote>
+            </aside>
+          )}
+        </article>
       )}
     </section>
   );
