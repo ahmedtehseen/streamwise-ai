@@ -44,6 +44,15 @@ function mediaTypeFor(file: File) {
   return null;
 }
 
+function looksBinary(bytes: Uint8Array) {
+  if (bytes.includes(0)) return true;
+  let suspiciousBytes = 0;
+  for (const byte of bytes) {
+    if (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) suspiciousBytes += 1;
+  }
+  return suspiciousBytes / bytes.length > 0.1;
+}
+
 export async function GET() {
   try {
     const configuration = knowledgeDatabaseConfiguration();
@@ -76,6 +85,7 @@ export async function POST(request: Request) {
   if (documentFile.size > MAX_DOCUMENT_BYTES) return Response.json({ error: "Keep the Project Document at or below 500 KB." }, { status: 413 });
 
   const bytes = new Uint8Array(await documentFile.arrayBuffer());
+  if (looksBinary(bytes)) return Response.json({ error: "The Project Document appears to contain binary content." }, { status: 415 });
   let text: string;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes).replace(/^\uFEFF/, "");
@@ -88,9 +98,8 @@ export async function POST(request: Request) {
 
   const client = createKnowledgeClient(configuration.supabaseUrl, configuration.serviceRoleKey);
   const fingerprint = createHash("sha256").update(bytes).digest("hex");
-  const { data: indexingDocument, error: insertError } = await client
-    .from("project_documents")
-    .insert({
+  const { data: indexingDocument, error: insertError } = await client.rpc("begin_project_document_indexing", {
+    p_document: {
       knowledge_base_id: KNOWLEDGE_BASE_ID,
       name: documentFile.name,
       media_type: mediaType,
@@ -98,9 +107,14 @@ export async function POST(request: Request) {
       original_text: text,
       content_fingerprint: fingerprint,
       status: "indexing"
-    })
-    .select("id,name,media_type,byte_size,status,failure_detail,created_at,updated_at")
-    .single();
+    }
+  });
+  if (insertError?.message.includes("KNOWLEDGE_BASE_CAPACITY")) {
+    return Response.json({ error: "The Knowledge Base can contain at most 20 Project Documents." }, { status: 409 });
+  }
+  if (insertError?.code === "23505") {
+    return Response.json({ error: "An identical Project Document is already in the Knowledge Base." }, { status: 409 });
+  }
   if (insertError || !indexingDocument) return Response.json({ error: "The Project Document could not be saved for indexing." }, { status: 502 });
 
   try {
