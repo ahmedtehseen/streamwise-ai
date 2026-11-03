@@ -17,6 +17,7 @@ export default function KnowledgePanel() {
   const [documents, setDocuments] = useState<ProjectDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const [deletingDocumentIds, setDeletingDocumentIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -64,6 +65,24 @@ export default function KnowledgePanel() {
     }
   }
 
+  async function deleteDocument(document: ProjectDocument) {
+    if (deletingDocumentIds.includes(document.id)) return;
+    setError(null);
+    setDeletingDocumentIds((current) => [...current, document.id]);
+    try {
+      const response = await fetch(`/api/knowledge/documents/${encodeURIComponent(document.id)}`, { method: "DELETE" });
+      if (!response.ok) {
+        const payload = await response.json() as { error?: string };
+        throw new Error(payload.error || "The Project Document could not be deleted.");
+      }
+      setDocuments((current) => current.filter((item) => item.id !== document.id));
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "The Project Document could not be deleted.");
+    } finally {
+      setDeletingDocumentIds((current) => current.filter((documentId) => documentId !== document.id));
+    }
+  }
+
   return (
     <section className="knowledge-panel" aria-labelledby="knowledge-heading">
       <div className="knowledge-intro">
@@ -85,8 +104,15 @@ export default function KnowledgePanel() {
         <ul className="knowledge-list">
           {documents.map((document) => (
             <li key={document.id}>
-              <div><strong>{document.name}</strong><span>{Math.max(1, Math.ceil(document.byteSize / 1024))} KB · {document.mediaType === "text/markdown" ? "Markdown" : "Plain text"}</span></div>
-              <span className={`document-status ${document.status}`}><i aria-hidden="true" />{document.status}</span>
+              <div className="document-details"><strong>{document.name}</strong><span>{Math.max(1, Math.ceil(document.byteSize / 1024))} KB · {document.mediaType === "text/markdown" ? "Markdown" : "Plain text"}</span></div>
+              <div className="document-actions">
+                <span className={`document-status ${document.status}`}><i aria-hidden="true" />{document.status}</span>
+                {document.status === "ready" && (
+                  <button type="button" onClick={() => deleteDocument(document)} disabled={deletingDocumentIds.includes(document.id)}>
+                    {deletingDocumentIds.includes(document.id) ? "Deleting…" : "Delete"}
+                  </button>
+                )}
+              </div>
             </li>
           ))}
         </ul>
