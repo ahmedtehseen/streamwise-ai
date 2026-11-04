@@ -1,6 +1,6 @@
 "use client";
 
-import { type ClipboardEvent as ReactClipboardEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ClipboardEvent as ReactClipboardEvent, FormEvent, type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -102,7 +102,7 @@ function migrateStoredConversations(conversations: Conversation[]) {
 function StudyPlanCard({ plan }: { plan: LegacyStudyPlan }) {
   return (
     <section className="study-plan" aria-label="Structured study plan">
-      <div className="plan-heading"><span>STRUCTURED PLAN</span><strong>{plan.estimatedMinutes} min</strong></div>
+      <div className="plan-heading"><span>Structured plan</span><strong>{plan.estimatedMinutes} min</strong></div>
       <h2>{plan.title}</h2>
       <p>{plan.objective}</p>
       <ol>
@@ -115,11 +115,11 @@ function StudyPlanCard({ plan }: { plan: LegacyStudyPlan }) {
 function TaskSpecCard({ spec, draft, isCreatingDraft, onChange, onCreateDraft }: { spec: TaskSpec; draft?: TaskDraft; isCreatingDraft: boolean; onChange: (next: TaskSpec) => void; onCreateDraft: () => void }) {
   return (
     <section className="task-spec" aria-label="Editable structured task specification">
-      <div className="spec-heading"><span>STRUCTURED TASK SPEC</span><select value={spec.priority} disabled={Boolean(draft)} onChange={(event) => onChange({ ...spec, priority: event.target.value as TaskSpec["priority"] })} aria-label="Task priority"><option value="low">Low priority</option><option value="medium">Medium priority</option><option value="high">High priority</option></select></div>
-      <input className="spec-title" value={spec.title} disabled={Boolean(draft)} onChange={(event) => onChange({ ...spec, title: event.target.value })} aria-label="Task title" />
-      <textarea className="spec-summary" value={spec.summary} disabled={Boolean(draft)} onChange={(event) => onChange({ ...spec, summary: event.target.value })} aria-label="Task summary" rows={2} />
-      <div className="spec-section"><h3>Acceptance criteria</h3><ul>{spec.acceptanceCriteria.map((criterion, index) => <li key={index}><input value={criterion} disabled={Boolean(draft)} onChange={(event) => { const acceptanceCriteria = [...spec.acceptanceCriteria]; acceptanceCriteria[index] = event.target.value; onChange({ ...spec, acceptanceCriteria }); }} aria-label={`Acceptance criterion ${index + 1}`} /></li>)}</ul></div>
-      <div className="spec-section"><h3>Implementation notes</h3><ul>{spec.implementationNotes.map((note, index) => <li key={index}><input value={note} disabled={Boolean(draft)} onChange={(event) => { const implementationNotes = [...spec.implementationNotes]; implementationNotes[index] = event.target.value; onChange({ ...spec, implementationNotes }); }} aria-label={`Implementation note ${index + 1}`} /></li>)}</ul></div>
+      <div className="spec-heading"><span>Structured task spec</span>{draft ? <span className="spec-priority">{spec.priority} priority</span> : <select value={spec.priority} onChange={(event) => onChange({ ...spec, priority: event.target.value as TaskSpec["priority"] })} aria-label="Task priority"><option value="low">Low priority</option><option value="medium">Medium priority</option><option value="high">High priority</option></select>}</div>
+      {draft ? <h2 className="spec-title">{spec.title}</h2> : <input className="spec-title" value={spec.title} onChange={(event) => onChange({ ...spec, title: event.target.value })} aria-label="Task title" />}
+      {draft ? <p className="spec-summary">{spec.summary}</p> : <textarea className="spec-summary" value={spec.summary} onChange={(event) => onChange({ ...spec, summary: event.target.value })} aria-label="Task summary" rows={2} />}
+      <div className="spec-section"><h3>Acceptance criteria</h3><ul>{spec.acceptanceCriteria.map((criterion, index) => <li key={index}>{draft ? <span className="spec-static-field">{criterion}</span> : <textarea value={criterion} onChange={(event) => { const acceptanceCriteria = [...spec.acceptanceCriteria]; acceptanceCriteria[index] = event.target.value; onChange({ ...spec, acceptanceCriteria }); }} aria-label={`Acceptance criterion ${index + 1}`} rows={1} />}</li>)}</ul></div>
+      <div className="spec-section"><h3>Implementation notes</h3><ul>{spec.implementationNotes.map((note, index) => <li key={index}>{draft ? <span className="spec-static-field">{note}</span> : <textarea value={note} onChange={(event) => { const implementationNotes = [...spec.implementationNotes]; implementationNotes[index] = event.target.value; onChange({ ...spec, implementationNotes }); }} aria-label={`Implementation note ${index + 1}`} rows={1} />}</li>)}</ul></div>
       {draft ? <div className="draft-receipt"><strong>Draft created</strong><span>#{draft.id.slice(0, 8)} · saved only in this browser</span></div> : <div className="draft-action"><p>Review the editable spec. Creating a draft is the approval step; nothing is published.</p><button type="button" onClick={onCreateDraft} disabled={isCreatingDraft}>{isCreatingDraft ? "Creating draft…" : "Create draft task"}</button></div>}
     </section>
   );
@@ -140,9 +140,12 @@ export default function Home() {
   const [creatingDraftMessageId, setCreatingDraftMessageId] = useState<string | null>(null);
   const [copiedDraftId, setCopiedDraftId] = useState<string | null>(null);
   const [hasHydrated, setHasHydrated] = useState(false);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const threadEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const messageImageUrlsRef = useRef(messageImageUrls);
   const imagePreviewUrl = useObjectUrl(selectedImage);
   const activeConversation = useMemo(() => conversations.find((c) => c.id === activeConversationId) ?? null, [activeConversationId, conversations]);
@@ -164,6 +167,7 @@ export default function Home() {
 
   function startNewChat() {
     if (isLoading) return;
+    setIsMobileNavOpen(false);
     setActiveConversationId(null);
     setMenuConversationId(null);
     setInput("");
@@ -201,15 +205,42 @@ export default function Home() {
     selectImage(image);
   }
 
-  function toggleSpecMode() {
-    if (mode === "spec") clearSelectedImage();
-    setMode((current) => current === "spec" ? "chat" : "spec");
-  }
-
   function selectMode(nextMode: ApplicationMode) {
     if (isLoading) return;
-    if (nextMode !== "spec") clearSelectedImage();
+    if (nextMode !== "spec" && selectedImage) {
+      const shouldDiscard = window.confirm("Switch modes and remove the attached screenshot?");
+      if (!shouldDiscard) return;
+      clearSelectedImage();
+    }
     setMode(nextMode);
+  }
+
+  function closeMobileNavigation() {
+    setIsMobileNavOpen(false);
+    requestAnimationFrame(() => mobileMenuButtonRef.current?.focus());
+  }
+
+  function handleMobileNavigationKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (!isMobileNavOpen) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeMobileNavigation();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = Array.from(sidebarRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+    ) ?? []).filter((element) => element.offsetParent !== null);
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   function updateMessages(conversationId: string, update: (messages: ChatMessage[]) => ChatMessage[]) {
@@ -304,6 +335,7 @@ export default function Home() {
   }
 
   function openDraft(draft: DraftListItem) {
+    setIsMobileNavOpen(false);
     setActiveConversationId(draft.conversationId);
     setMenuConversationId(null);
     window.setTimeout(() => {
@@ -374,38 +406,39 @@ export default function Home() {
 
   return (
     <main className="app-shell">
-      <aside className="sidebar" aria-label="Conversation history">
+      <aside ref={sidebarRef} className={`sidebar ${isMobileNavOpen ? "mobile-open" : ""}`} aria-label="Conversation history" role={isMobileNavOpen ? "dialog" : undefined} aria-modal={isMobileNavOpen ? true : undefined} onKeyDown={handleMobileNavigationKeyDown}>
         <div className="sidebar-top">
-          <div className="brand"><span className="brand-mark">✦</span> Gemini Lab</div>
+          <div className="brand"><span className="brand-glyph" aria-hidden="true" /> Gemini Lab</div>
           <button className="new-chat-button" type="button" onClick={startNewChat} disabled={isLoading}><span>＋</span> New chat</button>
+          <button ref={mobileMenuButtonRef} className="mobile-menu-button" type="button" aria-expanded={isMobileNavOpen} aria-controls="saved-work-navigation" onClick={() => setIsMobileNavOpen((current) => !current)}>{isMobileNavOpen ? "Close" : "Menu"}</button>
         </div>
-        <nav className="conversation-list" aria-label="Saved conversations">
+        <nav id="saved-work-navigation" className="conversation-list" aria-label="Saved conversations">
           <p className="sidebar-label">Recent</p>
-          {conversations.length === 0 ? <p className="empty-history">Your chats will appear here.</p> : conversations.map((conversation) => (
+          {!hasHydrated ? <p className="empty-history">Loading saved conversations…</p> : conversations.length === 0 ? <p className="empty-history">Your chats will appear here.</p> : conversations.map((conversation) => (
             <div className={`conversation-row ${conversation.id === activeConversationId ? "active" : ""}`} key={conversation.id}>
-              <button className="conversation-button" type="button" onClick={() => { setActiveConversationId(conversation.id); setMenuConversationId(null); }} disabled={isLoading}><ConversationTitle title={conversation.title} /><small>{formatDate(conversation.updatedAt)}</small></button>
+              <button className="conversation-button" type="button" onClick={() => { setActiveConversationId(conversation.id); setMenuConversationId(null); setIsMobileNavOpen(false); }} disabled={isLoading}><ConversationTitle title={conversation.title} /><small>{formatDate(conversation.updatedAt)}</small></button>
               <div className="conversation-actions"><button className="conversation-more" type="button" onClick={() => setMenuConversationId((current) => current === conversation.id ? null : conversation.id)} aria-label={`More options for ${conversation.title}`} aria-expanded={menuConversationId === conversation.id} disabled={isLoading}>⋯</button>{menuConversationId === conversation.id && <div className="conversation-menu"><button type="button" onClick={() => deleteConversation(conversation.id)}>Delete chat</button></div>}</div>
             </div>
           ))}
         </nav>
         <section className="drafts-panel" aria-labelledby="drafts-heading">
-          <div className="drafts-panel-heading"><p id="drafts-heading">Draft tasks</p><span>{drafts.length}</span></div>
-          {drafts.length === 0 ? <p className="empty-drafts">Approved task drafts will appear here.</p> : <ul className="draft-list">{drafts.map((draft) => <li key={draft.draft.id}><div className="draft-summary" title={draft.draft.taskSpec.title}><span>{draft.draft.taskSpec.title}</span><small>{draft.draft.taskSpec.priority} priority</small></div><div className="draft-controls"><button type="button" onClick={() => openDraft(draft)} aria-label={`Open ${draft.draft.taskSpec.title}`}>Open</button><button type="button" onClick={() => copyDraft(draft.draft)} aria-label={`Copy ${draft.draft.taskSpec.title}`}>{copiedDraftId === draft.draft.id ? "Copied" : "Copy"}</button><button className="draft-delete" type="button" onClick={() => deleteDraft(draft)} aria-label={`Delete ${draft.draft.taskSpec.title}`}>Delete</button></div></li>)}</ul>}
+          <div className="drafts-panel-heading"><p id="drafts-heading">Draft tasks</p><span>{hasHydrated ? drafts.length : "…"}</span></div>
+          {!hasHydrated ? <p className="empty-drafts">Loading saved drafts…</p> : drafts.length === 0 ? <p className="empty-drafts">Approved task drafts will appear here.</p> : <ul className="draft-list">{drafts.map((draft) => <li key={draft.draft.id}><div className="draft-summary" title={draft.draft.taskSpec.title}><span>{draft.draft.taskSpec.title}</span><small>{draft.draft.taskSpec.priority} priority</small></div><div className="draft-controls"><button type="button" onClick={() => openDraft(draft)} aria-label={`Open ${draft.draft.taskSpec.title}`}>Open</button><button type="button" onClick={() => copyDraft(draft.draft)} aria-label={`Copy ${draft.draft.taskSpec.title}`}>{copiedDraftId === draft.draft.id ? "Copied" : "Copy"}</button><button className="draft-delete" type="button" onClick={() => deleteDraft(draft)} aria-label={`Delete ${draft.draft.taskSpec.title}`}>Delete</button></div></li>)}</ul>}
         </section>
         <p className="sidebar-note">Stored only in this browser</p>
       </aside>
 
       <section className="chat-panel">
         <header className="topbar">
-          <div className="chat-heading"><details className="learning-status"><summary>WEEK 5 · PROJECT KNOWLEDGE <span className="status-chevron" aria-hidden="true" /></summary><div className="learning-log"><p><strong>Week 1</strong><span>Streaming chat, history, deployment</span></p><p><strong>Week 2</strong><span>JSON schema, Zod validation, editable specs</span></p><p><strong>Week 3</strong><span>Tool calling, approval, local draft workflow</span></p><p><strong>Week 4</strong><span>Screenshot intake, vision analysis, upload states</span></p><p className="current"><strong>Week 5</strong><span>Durable Project Documents and embeddings</span></p></div></details><h1>{mode === "knowledge" ? "Knowledge" : activeConversation?.title ?? "New conversation"}</h1></div>
+          <div className="chat-heading"><details className="learning-status"><summary>Week 5 · Project knowledge <span className="status-chevron" aria-hidden="true" /></summary><div className="learning-log"><p><strong>Week 1</strong><span>Streaming chat, history, deployment</span></p><p><strong>Week 2</strong><span>JSON schema, Zod validation, editable specs</span></p><p><strong>Week 3</strong><span>Tool calling, approval, local draft workflow</span></p><p><strong>Week 4</strong><span>Screenshot intake, vision analysis, upload states</span></p><p className="current"><strong>Week 5</strong><span>Durable Project Documents and embeddings</span></p></div></details><h1>{mode === "knowledge" ? "Knowledge" : activeConversation?.title ?? (mode === "spec" ? "New task spec" : "New conversation")}</h1></div>
           <nav className="mode-switch" aria-label="Application mode"><button type="button" className={mode === "chat" ? "active" : ""} onClick={() => selectMode("chat")} aria-pressed={mode === "chat"}>Chat</button><button type="button" className={mode === "spec" ? "active" : ""} onClick={() => selectMode("spec")} aria-pressed={mode === "spec"}>Spec</button><button type="button" className={mode === "knowledge" ? "active" : ""} onClick={() => selectMode("knowledge")} aria-pressed={mode === "knowledge"}>Knowledge</button></nav>
         </header>
         {mode === "knowledge" ? <KnowledgePanel /> : <>
         <section className="thread" aria-live="polite" aria-label="Chat messages">
           {messages.length === 0 ? (
-            <div className="welcome"><span className="welcome-mark">✦</span><h2>How can I help you learn today?</h2><p>Chat with Gemini, create editable task specs, or attach a product screenshot to turn visible feedback into a reviewed draft workflow.</p><button type="button" className="prompt-chip" onClick={() => setInput("Explain streaming AI responses in a Next.js app using four short sections.")}>Explain streaming responses</button></div>
+            mode === "spec" ? <div className="welcome"><span className="brand-glyph welcome-mark" aria-hidden="true" /><h2>Turn an idea into a task spec</h2><p>Describe a feature or attach a product screenshot, then review the generated criteria before saving a draft.</p><button type="button" className="prompt-chip" onClick={() => setInput("Add a mobile navigation menu with accessible keyboard controls.")}>Try an example feature</button></div> : <div className="welcome"><span className="brand-glyph welcome-mark" aria-hidden="true" /><h2>How can I help you learn today?</h2><p>Ask Gemini a question and follow up as you learn. Your conversations stay in this browser.</p><button type="button" className="prompt-chip" onClick={() => setInput("Explain streaming AI responses in a Next.js app using four short sections.")}>Explain streaming responses</button></div>
           ) : messages.map((message) => (
-            <article className={`message ${message.role}`} id={`message-${message.id}`} tabIndex={message.taskDraft ? -1 : undefined} key={message.id}><div className="avatar">{message.role === "user" ? "T" : "✦"}</div><div className="message-body"><p className="message-role">{message.role === "user" ? "You" : "Gemini"}</p>{message.imageName ? <UserImageMessage name={message.imageName} previewUrl={messageImageUrls[message.id]} content={message.content} /> : message.taskSpec ? <TaskSpecCard spec={message.taskSpec} draft={message.taskDraft} isCreatingDraft={creatingDraftMessageId === message.id} onChange={(taskSpec) => updateTaskSpec(activeConversation!.id, message.id, taskSpec)} onCreateDraft={() => createTaskDraft(activeConversation!.id, message.id, message.taskSpec!)} /> : message.studyPlan ? <StudyPlanCard plan={message.studyPlan} /> : message.content ? <MarkdownMessage content={message.content} /> : <p>{isLoading ? <span className="typing">{message.pendingLabel ?? "Thinking"}<span>…</span></span> : "No response received."}</p>}</div></article>
+            <article className={`message ${message.role}`} id={`message-${message.id}`} tabIndex={message.taskDraft ? -1 : undefined} key={message.id}><div className="avatar">{message.role === "user" ? "T" : <span className="brand-glyph" aria-hidden="true" />}</div><div className="message-body"><p className="message-role">{message.role === "user" ? "You" : "Gemini"}</p>{message.imageName ? <UserImageMessage name={message.imageName} previewUrl={messageImageUrls[message.id]} content={message.content} /> : message.taskSpec ? <TaskSpecCard spec={message.taskSpec} draft={message.taskDraft} isCreatingDraft={creatingDraftMessageId === message.id} onChange={(taskSpec) => updateTaskSpec(activeConversation!.id, message.id, taskSpec)} onCreateDraft={() => createTaskDraft(activeConversation!.id, message.id, message.taskSpec!)} /> : message.studyPlan ? <StudyPlanCard plan={message.studyPlan} /> : message.content ? <MarkdownMessage content={message.content} /> : <p>{isLoading ? <span className="typing">{message.pendingLabel ?? "Thinking"}<span>…</span></span> : "No response received."}</p>}</div></article>
           ))}
           <div ref={threadEndRef} />
         </section>
@@ -413,8 +446,8 @@ export default function Home() {
           {selectedImage && imagePreviewUrl && <div className="attachment-preview" aria-live="polite"><Image className="attachment-thumbnail" src={imagePreviewUrl} alt={`Preview of ${selectedImage.name}`} width={48} height={48} unoptimized /><span><strong>{selectedImage.name}</strong><small>{(selectedImage.size / 1024 / 1024).toFixed(1)} MB · ready to analyze</small></span><button type="button" onClick={clearSelectedImage} aria-label={`Remove ${selectedImage.name}`}>×</button></div>}
           {attachmentError && <p className="attachment-error" role="alert">{attachmentError}</p>}
           <label className="sr-only" htmlFor="prompt">Message</label>
-          <textarea ref={inputRef} id="prompt" value={input} onChange={(event) => setInput(event.target.value)} onPaste={pasteImage} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={selectedImage ? "Add optional context for this screenshot…" : mode === "spec" ? "Describe a feature to turn into a task spec…" : "Message Gemini…"} rows={1} disabled={isLoading} />
-          <div className="composer-actions"><input ref={imageInputRef} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => selectImage(event.target.files?.[0])} disabled={isLoading} /><button className="attach-button" type="button" onClick={() => imageInputRef.current?.click()} disabled={isLoading} aria-label="Attach product screenshot" title="Attach product screenshot">＋</button><button className={`plan-button ${mode === "spec" ? "active" : ""}`} type="button" onClick={toggleSpecMode} disabled={isLoading} aria-pressed={mode === "spec"} title="Toggle editable task specification mode">Spec</button><button className="send-button" type="submit" disabled={isLoading || (!input.trim() && !selectedImage)} aria-label={mode === "spec" ? "Create task specification" : "Send message"}>↑</button></div>
+          <textarea ref={inputRef} id="prompt" value={input} onChange={(event) => setInput(event.target.value)} onPaste={pasteImage} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={selectedImage ? "Add context for this screenshot…" : mode === "spec" ? "Describe a feature…" : "Message Gemini…"} rows={1} disabled={isLoading} />
+          <div className="composer-actions"><input ref={imageInputRef} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => selectImage(event.target.files?.[0])} disabled={isLoading} /><button className="attach-button" type="button" onClick={() => imageInputRef.current?.click()} disabled={isLoading} aria-label="Attach product screenshot" title="Attach product screenshot">＋</button><button className="send-button" type="submit" disabled={isLoading || (!input.trim() && !selectedImage)} aria-label={mode === "spec" ? "Create task specification" : "Send message"}>↑</button></div>
         </form>
         <p className="disclaimer">Gemini can make mistakes. Do not enter sensitive information while using the free API tier.</p>
         </>}
