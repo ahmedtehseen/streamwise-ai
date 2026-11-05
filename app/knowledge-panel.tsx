@@ -32,13 +32,15 @@ type GroundedAnswer = {
   paragraphs: [];
 };
 
+type KnowledgeResponse = GroundedAnswer & { degradedSearch?: boolean };
+
 export default function KnowledgePanel() {
   const [documents, setDocuments] = useState<ProjectDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [question, setQuestion] = useState("");
   const [isAsking, setIsAsking] = useState(false);
-  const [answer, setAnswer] = useState<GroundedAnswer | null>(null);
+  const [answer, setAnswer] = useState<KnowledgeResponse | null>(null);
   const [selectedSource, setSelectedSource] = useState<SourceReference | null>(null);
   const [deletingDocumentIds, setDeletingDocumentIds] = useState<string[]>([]);
   const [retryingDocumentId, setRetryingDocumentId] = useState<string | null>(null);
@@ -186,7 +188,7 @@ export default function KnowledgePanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: question.trim() })
       });
-      const payload = await response.json() as GroundedAnswer | { error?: string };
+      const payload = await response.json() as KnowledgeResponse | { error?: string };
       if (!response.ok || !("outcome" in payload)) {
         throw new Error("error" in payload && payload.error ? payload.error : "A Grounded Answer could not be generated.");
       }
@@ -425,6 +427,11 @@ export default function KnowledgePanel() {
             />
             <span>{askingStep}</span>
           </div>
+        )}
+        {answer?.degradedSearch && (
+          <p className="knowledge-degraded" role="status">
+            Semantic search is temporarily unavailable. These keyword results may be less complete.
+          </p>
         )}
         {answer?.outcome === "insufficient_evidence" && <p className="knowledge-empty">The Knowledge Base does not contain enough evidence to answer that question.</p>}
         {answer?.outcome === "answered" && (

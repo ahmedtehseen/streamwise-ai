@@ -81,7 +81,8 @@ Apply the versioned migrations located in `supabase/migrations/` in ascending or
 4. `202611030004_recover_document_indexing.sql`
 5. `202611040001_multi_format_and_hybrid_search.sql`
 6. `202611060001_enforce_public_allowance.sql`
-7. `202611060002_replace_project_documents.sql`
+7. `202611060002_degraded_full_text_retrieval.sql`
+8. `202611060003_replace_project_documents.sql`
 
 You can apply them using the Supabase SQL Editor or via the script:
 ```sh
@@ -120,7 +121,7 @@ npm run build               # Verify Next.js production build
 The automated test suite verifies:
 - Multi-format file validation, text extraction, and rejection of unsupported formats (e.g., `.docx`).
 - Chunk indexing, content fingerprinting, deduplication, and capacity enforcement (20 documents).
-- Ready-only retrieval, cosine distance filtering, and keyword search via RRF.
+- Ready-only hybrid retrieval plus explicit full-text-only degradation when Embedding 2 is temporarily unavailable.
 - Grounded Answer synthesis, Insufficient Evidence boundaries, and citation validation.
 - Portfolio Owner authorization enforcement on Project Document upload, retry, and deletion endpoints.
 - Document Replacement success, failure isolation, retry, discard, concurrency, full-capacity, duplicate, authorization, activation, and cleanup behavior.
@@ -150,6 +151,11 @@ The automated test suite verifies:
   - Full-text search using `tsvector` generated column (`chunk_to_tsvector`) and GIN index.
   - Reciprocal Rank Fusion: $RRF = \frac{1}{60 + r_{\text{vector}}} + \frac{1}{60 + r_{\text{fts}}}$.
   - Returns top 5 fused chunks.
+- **Degraded Retrieval**:
+  - Eligible temporary Embedding 2 failures use only PostgreSQL full-text search over ready Project Documents.
+  - The API and Knowledge interface disclose reduced-recall keyword search.
+  - No keyword match returns Insufficient Evidence without invoking answer generation.
+  - Authentication failures and invalid or incompatible vectors never trigger degradation.
 
 ---
 
@@ -185,8 +191,13 @@ Perform this procedure against a configured private Supabase project and Gemini 
    - Select the reference to inspect the heading path, line range, and excerpt.
 5. **Verify Insufficient Evidence Boundary**: Ask: `What is Atlas's annual infrastructure budget?`
    - Confirm the result is **Insufficient Evidence** with no hallucinated answers or references.
-6. **Verify Duplicate Rejection**: Upload the unchanged `atlas.md` again (renaming the file is allowed; changing byte content is not). Confirm duplicate content is rejected.
-7. **Test Transient Failure Handling**: In the Supabase SQL editor, run:
+6. **Verify Degraded Retrieval**: With the configured Gemini project returning an eligible temporary Embedding 2 failure (HTTP 408, 429, or 5xx), ask: `When does Atlas production deploy?`
+   - Confirm the interface says semantic search is temporarily unavailable and keyword results may be less complete.
+   - Confirm the Grounded Answer still cites the exact `atlas.md` passage.
+   - Ask: `What is Atlas's annual infrastructure budget?` and confirm degraded Insufficient Evidence is returned without an answer.
+   - Confirm an authentication failure or an invalid-dimension embedding returns an error instead of entering degraded search.
+7. **Verify Duplicate Rejection**: Upload the unchanged `atlas.md` again (renaming the file is allowed; changing byte content is not). Confirm duplicate content is rejected.
+8. **Test Transient Failure Handling**: In the Supabase SQL editor, run:
 
    ```sql
    update public.project_documents
@@ -198,16 +209,16 @@ Perform this procedure against a configured private Supabase project and Gemini 
    ```
 
    Reload Knowledge. Confirm `operations.txt` displays **failed**, the failure detail is visible, and **Retry indexing** is offered.
-8. **Test Retry**: Choose **Retry indexing**. Confirm the status transitions through **Retrying…** / **indexing** to **ready**.
-9. **Test Cascading Deletion**: Copy the document ID: `select id from public.project_documents where name = 'operations.txt';`. Delete `operations.txt` in the UI. Confirm it disappears from the list, and verify in SQL that chunks were deleted:
+9. **Test Retry**: Choose **Retry indexing**. Confirm the status transitions through **Retrying…** / **indexing** to **ready**.
+10. **Test Cascading Deletion**: Copy the document ID: `select id from public.project_documents where name = 'operations.txt';`. Delete `operations.txt` in the UI. Confirm it disappears from the list, and verify in SQL that chunks were deleted:
 
    ```sql
    select count(*) from public.document_chunks where project_document_id = '<copied-id>'::uuid;
    ```
 
    The count must be `0`.
-10. **Multi-Mode Integration**: Switch to **Chat**, send a message, and verify streaming. Switch to **Spec**, submit a prompt, and verify the editable task card. Return to **Knowledge** and confirm document status remains consistent.
-11. **Verify Safe Replacement**: Choose **Replace** for `atlas.md` and submit a changed revision. During processing, ask a question supported only by the current revision and confirm it remains available. Confirm successful processing swaps the displayed revision. For atomic database proof, verify the new ready row and chunks exist while the superseded row and chunks do not; repeat with a forced embedding failure and confirm the current ready row and chunks remain unchanged, then retry or discard the failed candidate.
+11. **Multi-Mode Integration**: Switch to **Chat**, send a message, and verify streaming. Switch to **Spec**, submit a prompt, and verify the editable task card. Return to **Knowledge** and confirm document status remains consistent.
+12. **Verify Safe Replacement**: Choose **Replace** for `atlas.md` and submit a changed revision. During processing, ask a question supported only by the current revision and confirm it remains available. Confirm successful processing swaps the displayed revision. For atomic database proof, verify the new ready row and chunks exist while the superseded row and chunks do not; repeat with a forced embedding failure and confirm the current ready row and chunks remain unchanged, then retry or discard the failed candidate.
 
 ---
 
@@ -218,6 +229,7 @@ Perform this procedure against a configured private Supabase project and Gemini 
 - **Week 3 · Approved Tool Calling & Local Drafts**: Human approval gate triggering function calling (`create_task_draft`), input/output schema validation, and local draft receipt management.
 - **Week 4 · Multimodal Screenshot Intake**: Direct screenshot upload and paste (PNG/JPEG/WebP up to 5 MB), vision analysis, and conversion to structured task specifications.
 - **Week 5 · Project Knowledge Assistant & Advanced RAG**: Shared Knowledge Base with Supabase Postgres and `pgvector`, multi-format document ingestion, hybrid search with Reciprocal Rank Fusion, deterministic keyword extraction, dual-guardrail pre-checks, admin ingestion protection, and source-grounded answers.
+- **Week 6 · Trustworthy public Streamwise**: Shared public allowances and visibly degraded full-text retrieval that preserves Grounded Answers, Source References, and Insufficient Evidence.
 
 ---
 
