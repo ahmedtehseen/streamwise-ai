@@ -12,6 +12,7 @@ type ProjectDocument = {
   retryable: boolean;
   createdAt: string;
   updatedAt: string;
+  replacement?: ProjectDocument;
 };
 
 type SourceReference = {
@@ -43,6 +44,8 @@ export default function KnowledgePanel() {
   const [selectedSource, setSelectedSource] = useState<SourceReference | null>(null);
   const [deletingDocumentIds, setDeletingDocumentIds] = useState<string[]>([]);
   const [retryingDocumentId, setRetryingDocumentId] = useState<string | null>(null);
+  const [replacingDocumentId, setReplacingDocumentId] = useState<string | null>(null);
+  const [discardingReplacementId, setDiscardingReplacementId] = useState<string | null>(null);
   const [documentError, setDocumentError] = useState<string | null>(null);
   const [questionError, setQuestionError] = useState<string | null>(null);
   const [isDocumentDrawerOpen, setIsDocumentDrawerOpen] = useState(false);
@@ -248,6 +251,97 @@ export default function KnowledgePanel() {
     }
   }
 
+  async function replaceDocument(document: ProjectDocument, file: File) {
+    if (replacingDocumentId || document.replacement) return;
+    setDocumentError(null);
+    setReplacingDocumentId(document.id);
+    const now = new Date().toISOString();
+    const pending: ProjectDocument = {
+      id: `replacement-${crypto.randomUUID()}`,
+      name: file.name,
+      mediaType: file.type,
+      byteSize: file.size,
+      status: "indexing",
+      failureDetail: null,
+      retryable: false,
+      createdAt: now,
+      updatedAt: now
+    };
+    setDocuments((current) => current.map((item) => item.id === document.id ? { ...item, replacement: pending } : item));
+    try {
+      const formData = new FormData();
+      formData.set("document", file);
+      const headers: Record<string, string> = {};
+      if (adminKey.trim()) headers["x-admin-key"] = adminKey.trim();
+      const response = await fetch(`/api/knowledge/documents/${encodeURIComponent(document.id)}/replacement`, { method: "POST", headers, body: formData });
+      const payload = await response.json() as { document?: ProjectDocument; replacement?: ProjectDocument; error?: string };
+      if (response.ok && payload.document) {
+        setDocuments((current) => current.map((item) => item.id === document.id ? payload.document! : item));
+        setAnswer(null);
+        setSelectedSource(null);
+        return;
+      }
+      setDocuments((current) => current.map((item) => item.id === document.id
+        ? { ...item, replacement: payload.replacement }
+        : item));
+      throw new Error(payload.error || "The Document Replacement could not be processed.");
+    } catch (caughtError) {
+      setDocuments((current) => current.map((item) => item.id === document.id && item.replacement?.id === pending.id
+        ? { ...item, replacement: undefined }
+        : item));
+      setDocumentError(caughtError instanceof Error ? caughtError.message : "The Document Replacement could not be processed.");
+    } finally {
+      setReplacingDocumentId(null);
+    }
+  }
+
+  async function retryReplacement(document: ProjectDocument) {
+    if (!document.replacement || retryingDocumentId) return;
+    setDocumentError(null);
+    setRetryingDocumentId(document.id);
+    setDocuments((current) => current.map((item) => item.id === document.id && item.replacement
+      ? { ...item, replacement: { ...item.replacement, status: "indexing", failureDetail: null, retryable: false } }
+      : item));
+    try {
+      const headers: Record<string, string> = {};
+      if (adminKey.trim()) headers["x-admin-key"] = adminKey.trim();
+      const response = await fetch(`/api/knowledge/documents/${encodeURIComponent(document.id)}/replacement/retry`, { method: "POST", headers });
+      const payload = await response.json() as { document?: ProjectDocument; replacement?: ProjectDocument; error?: string };
+      if (response.ok && payload.document) {
+        setDocuments((current) => current.map((item) => item.id === document.id ? payload.document! : item));
+        setAnswer(null);
+        setSelectedSource(null);
+        return;
+      }
+      if (payload.replacement) setDocuments((current) => current.map((item) => item.id === document.id ? { ...item, replacement: payload.replacement } : item));
+      throw new Error(payload.error || "The Document Replacement could not be retried.");
+    } catch (caughtError) {
+      setDocumentError(caughtError instanceof Error ? caughtError.message : "The Document Replacement could not be retried.");
+    } finally {
+      setRetryingDocumentId(null);
+    }
+  }
+
+  async function discardReplacement(document: ProjectDocument) {
+    if (!document.replacement || discardingReplacementId) return;
+    setDocumentError(null);
+    setDiscardingReplacementId(document.id);
+    try {
+      const headers: Record<string, string> = {};
+      if (adminKey.trim()) headers["x-admin-key"] = adminKey.trim();
+      const response = await fetch(`/api/knowledge/documents/${encodeURIComponent(document.id)}/replacement`, { method: "DELETE", headers });
+      if (!response.ok) {
+        const payload = await response.json() as { error?: string };
+        throw new Error(payload.error || "The Document Replacement could not be discarded.");
+      }
+      setDocuments((current) => current.map((item) => item.id === document.id ? { ...item, replacement: undefined } : item));
+    } catch (caughtError) {
+      setDocumentError(caughtError instanceof Error ? caughtError.message : "The Document Replacement could not be discarded.");
+    } finally {
+      setDiscardingReplacementId(null);
+    }
+  }
+
   return (
     <section className="knowledge-panel" aria-labelledby="knowledge-heading">
       <div className="knowledge-canvas">
@@ -379,7 +473,7 @@ export default function KnowledgePanel() {
                 <input
                   id="admin-key-input"
                   type="password"
-                  placeholder="Enter owner secret to upload or delete"
+                  placeholder="Enter owner secret to manage documents"
                   value={adminKey}
                   onChange={(e) => {
                     setAdminKey(e.target.value);
@@ -416,7 +510,40 @@ export default function KnowledgePanel() {
                             {retryingDocumentId === document.id ? "Retrying…" : "Retry"}
                           </button>
                         )}
+                        {document.status === "ready" && !document.replacement && (
+                          <>
+                            <input
+                              className="sr-only"
+                              id={`replace-${document.id}`}
+                              type="file"
+                              accept=".md,.markdown,.txt,.pdf,.html,.htm,.json,.csv,text/markdown,text/plain,application/pdf,text/html,application/json,text/csv"
+                              disabled={replacingDocumentId !== null}
+                              onChange={(event) => {
+                                const file = event.target.files?.[0];
+                                if (file) void replaceDocument(document, file);
+                                event.target.value = "";
+                              }}
+                            />
+                            <label className="document-delete" htmlFor={`replace-${document.id}`}>
+                              {replacingDocumentId === document.id ? "Replacing…" : "Replace"}
+                            </label>
+                          </>
+                        )}
                       </div>
+                      {document.replacement && (
+                        <div className="document-details" aria-label={`Pending replacement for ${document.name}`}>
+                          <strong title={document.replacement.name}>Replacement: {document.replacement.name}</strong>
+                          <span>{Math.max(1, Math.ceil(document.replacement.byteSize / 1024))} KB · {formatMediaType(document.replacement.mediaType)}</span>
+                          <span className={`document-status ${document.replacement.status}`}><i aria-hidden="true" />{document.replacement.status}</span>
+                          {document.replacement.failureDetail && <span className="document-failure">{document.replacement.failureDetail}</span>}
+                          {document.replacement.status === "failed" && (
+                            <div className="document-actions">
+                              {document.replacement.retryable && <button type="button" onClick={() => retryReplacement(document)} disabled={retryingDocumentId !== null}>{retryingDocumentId === document.id ? "Retrying…" : "Retry replacement"}</button>}
+                              <button type="button" onClick={() => discardReplacement(document)} disabled={discardingReplacementId !== null}>{discardingReplacementId === document.id ? "Discarding…" : "Discard replacement"}</button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ul>

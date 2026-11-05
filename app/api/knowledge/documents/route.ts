@@ -45,10 +45,21 @@ export async function GET() {
     const client = createKnowledgeClient(configuration.supabaseUrl, configuration.serviceRoleKey);
     const { data, error } = await client
       .from("project_documents")
-      .select("id,name,media_type,byte_size,status,failure_detail,failure_retryable,created_at,updated_at")
+      .select("id,name,media_type,byte_size,status,failure_detail,failure_retryable,replaces_document_id,created_at,updated_at")
       .order("created_at", { ascending: false });
     if (error) return Response.json({ error: "The Knowledge Base could not be loaded." }, { status: 502 });
-    return Response.json({ documents: (data as ProjectDocumentRecord[]).map(publicProjectDocument) });
+    const records = data as ProjectDocumentRecord[];
+    const replacements = new Map(records
+      .filter((document) => document.replaces_document_id)
+      .map((document) => [document.replaces_document_id as string, publicProjectDocument(document)]));
+    return Response.json({
+      documents: records
+        .filter((document) => !document.replaces_document_id)
+        .map((document) => {
+          const replacement = replacements.get(document.id);
+          return replacement ? { ...publicProjectDocument(document), replacement } : publicProjectDocument(document);
+        })
+    });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Knowledge mode is not configured." }, { status: 500 });
   }

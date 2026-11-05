@@ -20,6 +20,7 @@ export type ProjectDocumentRecord = {
   status: "indexing" | "ready" | "failed";
   failure_detail?: string | null;
   failure_retryable?: boolean;
+  replaces_document_id?: string | null;
   created_at: string;
   updated_at: string;
 };
