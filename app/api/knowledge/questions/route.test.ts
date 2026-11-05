@@ -31,6 +31,9 @@ vi.mock("@supabase/supabase-js", () => ({
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("../../../../lib/public-allowance", () => ({
+  admitPublicAction: vi.fn(async () => null)
+}));
 
 describe("Project Knowledge Assistant question API", () => {
   beforeEach(() => {

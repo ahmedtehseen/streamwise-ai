@@ -1,5 +1,6 @@
 import { taskSpecJsonSchema, taskSpecSchema } from "../../../lib/task-spec";
 import { hasValidImageSignature, isSupportedImageType, MAX_IMAGE_BYTES } from "../../../lib/image-upload";
+import { admitPublicAction } from "../../../lib/public-allowance";
 
 export const runtime = "nodejs";
 
@@ -43,6 +44,9 @@ export async function POST(request: Request) {
   } else {
     parts.push({ text: `Turn this request into a concise, buildable task specification. Preserve explicit constraints, do not invent requirements, and make acceptance criteria testable. Request: ${taskRequest}` });
   }
+
+  const allowanceResponse = await admitPublicAction(request);
+  if (allowanceResponse) return allowanceResponse;
 
   const geminiResponse = await fetch(
     "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",

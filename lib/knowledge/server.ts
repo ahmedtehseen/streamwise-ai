@@ -112,17 +112,9 @@ async function requestEmbedding(value: string, apiKey: string, policy: Embedding
 
 export function verifyAdminAccess(request: Request): boolean {
   const secret = process.env.ADMIN_SECRET;
-  if (!secret) return true;
+  if (!secret) return process.env.NODE_ENV !== "production";
   const headerKey = request.headers.get("x-admin-key");
-  if (headerKey && headerKey === secret) return true;
-  try {
-    const url = new URL(request.url);
-    const queryKey = url.searchParams.get("adminKey");
-    if (queryKey && queryKey === secret) return true;
-  } catch {
-    // If request.url is relative or invalid
-  }
-  return false;
+  return Boolean(headerKey && headerKey === secret);
 }
 
 export function knowledgeDatabaseConfiguration() {

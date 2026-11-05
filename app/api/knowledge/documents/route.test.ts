@@ -157,6 +157,7 @@ describe("Knowledge Project Document API", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     delete process.env.SUPABASE_URL;
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     delete process.env.GEMINI_API_KEY;
@@ -520,6 +521,21 @@ describe("Knowledge Project Document API", () => {
       error: "Unauthorized. An Admin Key is required to upload Project Documents."
     });
     delete process.env.ADMIN_SECRET;
+  });
+
+  it("fails owner document mutation closed in production when ADMIN_SECRET is missing", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    delete process.env.ADMIN_SECRET;
+    const provider = vi.fn();
+    vi.stubGlobal("fetch", provider);
+    const formData = new FormData();
+    formData.set("document", new File(["Project notes"], "notes.txt", { type: "text/plain" }));
+
+    const { POST } = await import("./route");
+    const response = await POST(new Request("http://localhost/api/knowledge/documents", { method: "POST", body: formData }));
+
+    expect(response.status).toBe(401);
+    expect(provider).not.toHaveBeenCalled();
   });
 
   it("allows document upload when ADMIN_SECRET is set and valid x-admin-key is provided", async () => {

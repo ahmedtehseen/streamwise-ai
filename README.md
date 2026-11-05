@@ -26,7 +26,9 @@ The application features three integrated modes:
    - **Advanced RAG (Hybrid Search with RRF)**: Combines semantic vector similarity (`gemini-embedding-2`, 768 dimensions) and PostgreSQL full-text search (`tsvector` with GIN indexing) via Reciprocal Rank Fusion (RRF) in Supabase.
    - **Dual-Guardrail Pre-Check**: Short-circuits queries without relevant semantic similarity (cosine distance $\le 0.70$) or keyword matches directly to **Insufficient Evidence** in ~200ms, preserving Gemini API quota and minimizing latency.
    - **Grounded Answers & Source References**: Returns factual answers strictly grounded in retrieved evidence. Users can inspect interactive **Source References** showing the document name, heading path, line range, and stored excerpt.
-   - **Admin Access Control**: Secures document mutation endpoints (upload, retry, delete) via `ADMIN_SECRET` (`x-admin-key`), while providing visitors with an accessible Q&A interface with sample inquiry chips.
+   - **Portfolio Owner Access Control**: Secures Project Document mutation endpoints (upload, retry, delete) via `ADMIN_SECRET` (`x-admin-key`), while providing Visitors with an accessible Portfolio Assistant.
+
+All four public AI actions share one durable allowance: 3 actions per Visitor per minute, 15 globally per minute, 10 per Visitor per Pacific day, and 50 globally per Pacific day. Limit responses identify the reset time in Pacific time.
 
 ---
 
@@ -62,6 +64,7 @@ Configure the following server-side environment variables in `.env.local`:
 | `SUPABASE_URL` | Knowledge | Project URL from Supabase **Project Settings → API**. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Knowledge | Privileged service-role secret from Supabase **Project Settings → API** (server-only). |
 | `ADMIN_SECRET` | Knowledge | Shared owner key required to upload, retry, or delete Project Documents. Leave unset only for open local testing. |
+| `VISITOR_ID_SECRET` | Public AI routes | Server-only high-entropy secret of at least 32 characters, used to derive rotating one-way Visitor identifiers from Vercel's trusted client-address header. |
 | `SUPABASE_DB_URL` | Optional | Direct Postgres connection URI (optional; used by `scripts/apply-migration.mjs`). |
 
 > [!IMPORTANT]
@@ -76,6 +79,7 @@ Apply the versioned migrations located in `supabase/migrations/` in ascending or
 3. `202611030003_match_ready_document_chunks.sql`
 4. `202611030004_recover_document_indexing.sql`
 5. `202611040001_multi_format_and_hybrid_search.sql`
+6. `202611060001_enforce_public_allowance.sql`
 
 You can apply them using the Supabase SQL Editor or via the script:
 ```sh
@@ -116,7 +120,8 @@ The automated test suite verifies:
 - Chunk indexing, content fingerprinting, deduplication, and capacity enforcement (20 documents).
 - Ready-only retrieval, cosine distance filtering, and keyword search via RRF.
 - Grounded Answer synthesis, Insufficient Evidence boundaries, and citation validation.
-- Admin authentication enforcement on document upload, retry, and deletion endpoints.
+- Portfolio Owner authorization enforcement on Project Document upload, retry, and deletion endpoints.
+- Shared public allowance admission, missing Visitor identity, durable-storage failure, and minute/day reset responses at all four API seams.
 - Error handling for transient database and Gemini provider failures.
 
 ---
@@ -146,6 +151,8 @@ The automated test suite verifies:
 ---
 
 ## Real-Service Smoke Test
+
+Before the integrated workflow, run `PUBLIC_ALLOWANCE_TEST_CONFIRM=clear-test-buckets npm run allowance:verify` against an isolated test database configured in `PUBLIC_ALLOWANCE_TEST_DATABASE_URL`. The check temporarily clears only `public_allowance_buckets`, sends parallel admissions, proves that exactly 3 same-Visitor and 15 global requests are admitted, validates Pacific reset boundaries, and clears the test buckets afterward. Never point this check at production.
 
 Perform this procedure against a configured private Supabase project and Gemini API to verify the integrated end-to-end workflow:
 

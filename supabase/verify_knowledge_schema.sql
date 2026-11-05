@@ -36,4 +36,19 @@ select
     from public.knowledge_bases
     where id = '00000000-0000-0000-0000-000000000001'
       and name = 'Shared private Knowledge Base'
-  ) as shared_private_knowledge_base_ready;
+  ) as shared_private_knowledge_base_ready,
+  exists (
+    select 1
+    from pg_class as class
+    join pg_namespace as namespace on namespace.oid = class.relnamespace
+    where namespace.nspname = 'public'
+      and class.relname = 'public_allowance_buckets'
+      and class.relrowsecurity
+  ) as public_allowance_buckets_have_rls,
+  exists (
+    select 1
+    from pg_proc as procedure
+    join pg_namespace as namespace on namespace.oid = procedure.pronamespace
+    where namespace.nspname = 'public'
+      and procedure.proname = 'admit_public_action'
+  ) as public_allowance_admission_ready;
