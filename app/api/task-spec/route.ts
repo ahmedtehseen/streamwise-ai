@@ -1,6 +1,7 @@
 import { taskSpecJsonSchema, taskSpecSchema } from "../../../lib/task-spec";
 import { hasValidImageSignature, isSupportedImageType, MAX_IMAGE_BYTES } from "../../../lib/image-upload";
 import { admitPublicAction } from "../../../lib/public-allowance";
+import { GenerationUnavailableError, requestGeneration } from "../../../lib/generation";
 
 export const runtime = "nodejs";
 
@@ -48,17 +49,18 @@ export async function POST(request: Request) {
   const allowanceResponse = await admitPublicAction(request);
   if (allowanceResponse) return allowanceResponse;
 
-  const geminiResponse = await fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts }],
-        generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseSchema: taskSpecJsonSchema }
-      })
+  let geminiResponse: Response;
+  try {
+    geminiResponse = await requestGeneration("generateContent", process.env.GEMINI_API_KEY, {
+      contents: [{ role: "user", parts }],
+      generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseSchema: taskSpecJsonSchema }
+    });
+  } catch (error) {
+    if (error instanceof GenerationUnavailableError) {
+      return Response.json({ error: error.message }, { status: 503 });
     }
-  );
+    throw error;
+  }
 
   if (!geminiResponse.ok) {
     const fallback = "Gemini could not create the task specification. Please try again.";
