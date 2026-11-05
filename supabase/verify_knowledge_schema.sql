@@ -19,7 +19,7 @@ select
       and class.relname in ('knowledge_bases', 'project_documents', 'document_chunks')
   ) as knowledge_tables_have_rls,
   (
-    select count(*) = 5
+    select count(*) = 8
     from pg_proc as procedure
     join pg_namespace as namespace on namespace.oid = procedure.pronamespace
     where namespace.nspname = 'public'
@@ -28,9 +28,24 @@ select
         'complete_project_document_indexing',
         'fail_project_document_indexing',
         'retry_project_document_indexing',
+        'begin_project_document_replacement',
+        'retry_project_document_replacement',
+        'discard_project_document_replacement',
         'match_ready_document_chunks'
       )
   ) as knowledge_functions_ready,
+  exists (
+    select 1 from pg_attribute
+    where attrelid = 'public.project_documents'::regclass
+      and attname = 'replaces_document_id'
+      and not attisdropped
+  ) as document_replacement_link_ready,
+  exists (
+    select 1 from pg_indexes
+    where schemaname = 'public'
+      and indexname = 'project_documents_one_pending_replacement'
+      and indexdef ilike '%where (replaces_document_id is not null)%'
+  ) as one_pending_replacement_enforced,
   exists (
     select 1
     from public.knowledge_bases

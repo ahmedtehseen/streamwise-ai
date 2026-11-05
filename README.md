@@ -27,6 +27,7 @@ The application features three integrated modes:
    - **Dual-Guardrail Pre-Check**: Short-circuits queries without relevant semantic similarity (cosine distance $\le 0.70$) or keyword matches directly to **Insufficient Evidence** in ~200ms, preserving Gemini API quota and minimizing latency.
    - **Grounded Answers & Source References**: Returns factual answers strictly grounded in retrieved evidence. Users can inspect interactive **Source References** showing the document name, heading path, line range, and stored excerpt.
    - **Portfolio Owner Access Control**: Secures Project Document mutation endpoints (upload, retry, delete) via `ADMIN_SECRET` (`x-admin-key`), while providing Visitors with an accessible Portfolio Assistant.
+   - **Safe Document Replacement**: Stages one candidate revision while the current ready Project Document remains searchable, then atomically activates the candidate and removes superseded evidence only after successful processing.
 
 All four public AI actions share one durable allowance: 3 actions per Visitor per minute, 15 globally per minute, 10 per Visitor per Pacific day, and 50 globally per Pacific day. Limit responses identify the reset time in Pacific time.
 
@@ -80,6 +81,7 @@ Apply the versioned migrations located in `supabase/migrations/` in ascending or
 4. `202611030004_recover_document_indexing.sql`
 5. `202611040001_multi_format_and_hybrid_search.sql`
 6. `202611060001_enforce_public_allowance.sql`
+7. `202611060002_replace_project_documents.sql`
 
 You can apply them using the Supabase SQL Editor or via the script:
 ```sh
@@ -121,6 +123,7 @@ The automated test suite verifies:
 - Ready-only retrieval, cosine distance filtering, and keyword search via RRF.
 - Grounded Answer synthesis, Insufficient Evidence boundaries, and citation validation.
 - Portfolio Owner authorization enforcement on Project Document upload, retry, and deletion endpoints.
+- Document Replacement success, failure isolation, retry, discard, concurrency, full-capacity, duplicate, authorization, activation, and cleanup behavior.
 - Shared public allowance admission, missing Visitor identity, durable-storage failure, and minute/day reset responses at all four API seams.
 - Error handling for transient database and Gemini provider failures.
 
@@ -204,6 +207,7 @@ Perform this procedure against a configured private Supabase project and Gemini 
 
    The count must be `0`.
 10. **Multi-Mode Integration**: Switch to **Chat**, send a message, and verify streaming. Switch to **Spec**, submit a prompt, and verify the editable task card. Return to **Knowledge** and confirm document status remains consistent.
+11. **Verify Safe Replacement**: Choose **Replace** for `atlas.md` and submit a changed revision. During processing, ask a question supported only by the current revision and confirm it remains available. Confirm successful processing swaps the displayed revision. For atomic database proof, verify the new ready row and chunks exist while the superseded row and chunks do not; repeat with a forced embedding failure and confirm the current ready row and chunks remain unchanged, then retry or discard the failed candidate.
 
 ---
 
