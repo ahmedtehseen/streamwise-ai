@@ -27,6 +27,7 @@ The application features three integrated modes:
    - **Dual-Guardrail Pre-Check**: Short-circuits queries without relevant semantic similarity (cosine distance $\le 0.70$) or keyword matches directly to **Insufficient Evidence** in ~200ms, preserving Gemini API quota and minimizing latency.
    - **Grounded Answers & Source References**: Returns factual answers strictly grounded in retrieved evidence. Users can inspect interactive **Source References** showing the document name, heading path, line range, and stored excerpt.
    - **Portfolio Owner Access Control**: Secures Project Document mutation endpoints (upload, retry, delete) via `ADMIN_SECRET` (`x-admin-key`), while providing Visitors with an accessible Portfolio Assistant.
+   - **Reviewable Answer Flags**: Gives every Grounded Answer and Insufficient Evidence response a signed identity so Visitors can submit one anonymous, optional-note flag for private owner review without changing evidence or behavior automatically.
    - **Safe Document Replacement**: Stages one candidate revision while the current ready Project Document remains searchable, then atomically activates the candidate and removes superseded evidence only after successful processing.
 
 All four public AI actions share one durable allowance: 3 actions per Visitor per minute, 15 globally per minute, 10 per Visitor per Pacific day, and 50 globally per Pacific day. Limit responses identify the reset time in Pacific time.
@@ -64,7 +65,8 @@ Configure the following server-side environment variables in `.env.local`:
 | `GEMINI_API_KEY` | All modes | Gemini API key for chat streaming, structured specs, multimodal vision, embeddings, and grounded answers. |
 | `SUPABASE_URL` | Knowledge | Project URL from Supabase **Project Settings → API**. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Knowledge | Privileged service-role secret from Supabase **Project Settings → API** (server-only). |
-| `ADMIN_SECRET` | Knowledge | Shared owner key required to upload, retry, or delete Project Documents. Leave unset only for open local testing. |
+| `ADMIN_SECRET` | Knowledge | Shared owner key required to manage Project Documents and review Answer Flags. Leave unset only for open local testing. |
+| `ANSWER_FLAG_SECRET` | Optional | Dedicated server-only secret for signing response identities. When omitted, the service-role key is used as the signing key source. |
 | `VISITOR_ID_SECRET` | Public AI routes | Server-only high-entropy secret of at least 32 characters, used to derive rotating one-way Visitor identifiers from Vercel's trusted client-address header. |
 | `SUPABASE_DB_URL` | Optional | Direct Postgres connection URI (optional; used by `scripts/apply-migration.mjs`). |
 
@@ -83,6 +85,7 @@ Apply the versioned migrations located in `supabase/migrations/` in ascending or
 6. `202611060001_enforce_public_allowance.sql`
 7. `202611060002_degraded_full_text_retrieval.sql`
 8. `202611060003_replace_project_documents.sql`
+9. `202611060004_capture_answer_flags.sql`
 
 You can apply them using the Supabase SQL Editor or via the script:
 ```sh
@@ -125,6 +128,7 @@ The automated test suite verifies:
 - Grounded Answer synthesis, Insufficient Evidence boundaries, and citation validation.
 - Portfolio Owner authorization enforcement on Project Document upload, retry, and deletion endpoints.
 - Document Replacement success, failure isolation, retry, discard, concurrency, full-capacity, duplicate, authorization, activation, and cleanup behavior.
+- Answer Flag identity verification, Grounded Answer and Insufficient Evidence capture, degraded responses, duplicate prevention, note limits, owner authorization, and review transitions.
 - Shared public allowance admission, missing Visitor identity, durable-storage failure, and minute/day reset responses at all four API seams.
 - Error handling for transient database and Gemini provider failures.
 
@@ -229,7 +233,7 @@ Perform this procedure against a configured private Supabase project and Gemini 
 - **Week 3 · Approved Tool Calling & Local Drafts**: Human approval gate triggering function calling (`create_task_draft`), input/output schema validation, and local draft receipt management.
 - **Week 4 · Multimodal Screenshot Intake**: Direct screenshot upload and paste (PNG/JPEG/WebP up to 5 MB), vision analysis, and conversion to structured task specifications.
 - **Week 5 · Project Knowledge Assistant & Advanced RAG**: Shared Knowledge Base with Supabase Postgres and `pgvector`, multi-format document ingestion, hybrid search with Reciprocal Rank Fusion, deterministic keyword extraction, dual-guardrail pre-checks, admin ingestion protection, and source-grounded answers.
-- **Week 6 · Trustworthy public Streamwise**: Shared public allowances and visibly degraded full-text retrieval that preserves Grounded Answers, Source References, and Insufficient Evidence.
+- **Week 6 · Trustworthy public Streamwise**: Shared public allowances, visibly degraded full-text retrieval, reviewable Answer Flags, and safe Document Replacement.
 
 ---
 
@@ -244,6 +248,7 @@ Perform this procedure against a configured private Supabase project and Gemini 
 │   │   └── knowledge/
 │   │       ├── documents/route.ts             # Project Document upload & listing endpoint
 │   │       ├── documents/[documentId]/        # Document deletion and retry endpoints
+│   │       ├── answer-flags/                   # Visitor submission and owner review endpoints
 │   │       └── questions/route.ts             # Hybrid search & Grounded Answer endpoint
 │   ├── globals.css                            # Responsive styling & themes
 │   ├── knowledge-panel.tsx                    # Knowledge Base UI, drawer, & visitor Q&A
@@ -254,6 +259,7 @@ Perform this procedure against a configured private Supabase project and Gemini 
 │   ├── task-spec.ts                           # Zod schemas for task specifications & drafts
 │   └── knowledge/
 │       ├── chunks.ts                          # Document chunking & heading extraction
+│       ├── answer-flags.ts                    # Signed response identity creation and verification
 │       ├── extractors.ts                      # Multi-format parsers (PDF, HTML, JSON, CSV)
 │       ├── indexing.ts                        # Chunk embedding & vector preparation
 │       └── server.ts                          # Supabase client, hybrid search, & admin auth
