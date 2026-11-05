@@ -1,78 +1,156 @@
-# Streamwise AI learning project
+# Streamwise AI
 
-This app teaches the basic AI integration loop:
+Streamwise AI turns project material into structured, reviewable work and source-backed project knowledge.
 
-1. The browser sends the current conversation thread to `POST /api/chat`.
-2. The server keeps the Gemini key private and starts a streaming model request.
-3. The route turns model chunks into a web `ReadableStream`.
-4. The browser reads that stream and appends each chunk to the response.
-5. Conversations are saved in browser local storage, and the selected thread is sent back as context on the next message.
+Built with Next.js (App Router, Turbopack), the Google Gemini API, Supabase Postgres with `pgvector`, and TypeScript.
 
-## Run it
+---
 
-1. Install dependencies: `npm install`
-2. Create a `.env.local` file in the project root.
-3. Put your real Gemini API key in it as `GEMINI_API_KEY=your_key_here`. Never put it in a client component or commit `.env.local`.
-4. Start the app: `npm run dev`
-5. Visit `http://localhost:3000` and ask a question.
+## Capabilities & Modes
 
-## Important files
+The application features three integrated modes:
 
-- `app/page.tsx` — browser UI and stream reader.
-- `app/api/chat/route.ts` — private server endpoint; it calls Gemini and converts its SSE stream into plain text for the browser.
-- `.env.local` — your local secret, intentionally ignored by Git.
+1. **Chat (Streaming Chat)**
+   - Streams Gemini model responses chunk-by-chunk using web `ReadableStream` through a private server endpoint (`POST /api/chat`).
+   - Persists conversation history locally in the browser with local storage, restoring thread context across refreshes.
+   - Sends recent conversation history with each turn to maintain conversational memory.
 
-## Conversation storage
+2. **Spec (Structured Task Specifications & Approved Tool Calling)**
+   - **Text & Multimodal Intake**: Accepts written requirements or attached screenshots (PNG, JPEG, WebP up to 5 MB) via paste or file picker (`POST /api/task-spec`).
+   - **Guaranteed Output Schema**: Gemini returns structured JSON enforced with a strict response schema and validated on the server with Zod.
+   - **Human-in-the-Loop Tool Calling**: An explicit **Create draft task** action prompts a Gemini tool-call request (`create_task_draft`), strictly validating arguments against the approved spec before saving a local draft receipt (`POST /api/task-draft`).
+   - **Draft Task Management**: Review, copy as Markdown, open, or delete drafts directly from the sidebar.
 
-This learning project saves its conversation list locally in the browser, so it persists after a page refresh on this device. It does not yet use a database, authentication, or cross-device sync.
+3. **Knowledge (Project Knowledge Assistant & Advanced RAG)**
+   - **Multi-Format Ingestion**: Ingests Project Documents in Markdown (`.md`, `.markdown`), plain text (`.txt`), PDF (`.pdf`), HTML (`.html`, `.htm`), JSON (`.json`), and CSV (`.csv`) up to 500 KB (512,000 bytes) with automatic text extraction, heading-aware chunking, and deduplication.
+   - **Advanced RAG (Hybrid Search with RRF)**: Combines semantic vector similarity (`gemini-embedding-2`, 768 dimensions) and PostgreSQL full-text search (`tsvector` with GIN indexing) via Reciprocal Rank Fusion (RRF) in Supabase.
+   - **Dual-Guardrail Pre-Check**: Short-circuits queries without relevant semantic similarity (cosine distance $\le 0.70$) or keyword matches directly to **Insufficient Evidence** in ~200ms, preserving Gemini API quota and minimizing latency.
+   - **Grounded Answers & Source References**: Returns factual answers strictly grounded in retrieved evidence. Users can inspect interactive **Source References** showing the document name, heading path, line range, and stored excerpt.
+   - **Admin Access Control**: Secures document mutation endpoints (upload, retry, delete) via `ADMIN_SECRET` (`x-admin-key`), while providing visitors with an accessible Q&A interface with sample inquiry chips.
 
-## Week 2 milestone: structured, editable task specifications
+---
 
-Turn on **Spec** mode, enter a product or engineering request, then use the send button. In standard mode the send button continues the streaming chat; in Spec mode it calls `POST /api/task-spec`, which asks Gemini for JSON using a response schema, validates the parsed result with Zod on the server, and returns an editable task card with title, priority, acceptance criteria, and implementation notes. This demonstrates the production pattern for AI output that an interface or downstream system needs to rely on: request a defined shape, then validate it anyway before using it.
+## Getting Started
 
-It uses the existing `GEMINI_API_KEY`; no database, authentication, or new service is required. The spec route is intentionally non-streaming because the browser only renders it after the whole JSON document has been parsed and validated.
+### Prerequisites
 
-## What to experiment with
+- **Node.js**: `22.13.0` or newer (`npm ci` recommended)
+- **Google Gemini API Key**: For text generation, multimodal vision, and `gemini-embedding-2`
+- **Supabase Project**: With PostgreSQL and the `pgvector` extension (required for Knowledge mode)
 
-- Change the system message in `app/api/chat/route.ts` and see how output changes.
-- Add a character limit before the API request.
-- Notice that the server sends the latest 20 messages to Gemini on each request; this is the basic form of conversational memory.
+### 1. Installation
 
-## Week 5 milestone: Grounded Answers
+Install exact locked dependencies:
 
-Knowledge mode introduces a shared private Knowledge Base backed by Supabase Postgres and pgvector. After a Project Document is ready, a question combines vector similarity and PostgreSQL full-text search with reciprocal rank fusion, then returns either a structured Grounded Answer or Insufficient Evidence. Select a Source Reference to inspect its trusted document name, heading path, line range, and stored excerpt.
+```sh
+npm ci
+```
 
-This milestone still uses one shared Knowledge Base without user accounts, ownership, or per-document permissions. Setting `ADMIN_SECRET` protects document upload, retry, and deletion with a shared owner key while keeping the question interface available to visitors. Keep the Knowledge Base private until full access boundaries are implemented.
+### 2. Environment Configuration
 
-### Requirements and limits
+Copy `.env.example` (or `.env.local.example`) to `.env.local`:
 
-- Node.js 22.13 or newer and npm.
-- A private Supabase project and a Gemini API key.
-- Markdown (`.md` or `.markdown`), plain text (`.txt`), PDF (`.pdf`), HTML (`.html` or `.htm`), JSON (`.json`), and CSV (`.csv`) are accepted. Text-based formats must contain valid UTF-8. The extension is required and must agree with the reported MIME type, with explicit fallbacks for browsers that report an empty, generic, or text MIME type for a supported extension. Empty, malformed, unsupported, and larger-than-500-KB (512,000-byte) uploads are rejected; Word documents are intentionally unsupported.
-- The shared Knowledge Base holds at most 20 Project Documents, including indexing and failed records.
-- Every stored vector uses `gemini-embedding-2`, 768 dimensions, `Document: ` for Project Document passages, and `Query: ` for questions. Changing the model, dimension, or prefix convention requires re-indexing every Project Document; vectors produced with different invariants must never be mixed.
+```sh
+cp .env.example .env.local
+```
 
-### Fresh-checkout setup
+Configure the following server-side environment variables in `.env.local`:
 
-1. Use Node.js 22.13 or newer and install exactly the locked dependencies with `npm ci`.
-2. Create a private Supabase project. In its SQL editor, apply every file under `supabase/migrations` once, in filename order. The files are append-only, uniquely versioned schema history; do not combine, reorder, or edit an already-applied migration.
-3. Run `npm run migrations:validate`. This verifies local migration order and the required pgvector, security, lifecycle, retrieval, and embedding invariants.
-4. In the Supabase SQL editor, run `supabase/verify_knowledge_schema.sql` after the migrations. Every value in its single result row must be `true`. This confirms the applied database, not only the checked-in files.
-5. Copy `.env.example` (or `.env.local.example`) to `.env.local` and set all four server values:
-   - `GEMINI_API_KEY`: a Gemini API key allowed to call the embedding and answer models.
-   - `SUPABASE_URL`: the project URL from Supabase **Project Settings → API**.
-   - `SUPABASE_SERVICE_ROLE_KEY`: the project's service-role secret from the same settings page. This is privileged and server-only.
-   - `ADMIN_SECRET`: a strong shared owner key required for document upload, retry, and deletion. Leave it unset only for a private local development workflow.
-6. Run `npm run dev`, visit `http://localhost:3000`, and open **Knowledge**.
+| Variable | Required For | Description |
+|---|---|---|
+| `GEMINI_API_KEY` | All modes | Gemini API key for chat streaming, structured specs, multimodal vision, embeddings, and grounded answers. |
+| `SUPABASE_URL` | Knowledge | Project URL from Supabase **Project Settings → API**. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Knowledge | Privileged service-role secret from Supabase **Project Settings → API** (server-only). |
+| `ADMIN_SECRET` | Knowledge | Shared owner key required to upload, retry, or delete Project Documents. Leave unset only for open local testing. |
+| `SUPABASE_DB_URL` | Optional | Direct Postgres connection URI (optional; used by `scripts/apply-migration.mjs`). |
 
-Never commit `.env.local`, print secrets into logs or screenshots, use the service-role key in a browser component, or expose it through a `NEXT_PUBLIC_` variable. The migrations enable row-level security without browser policies; only the server-side client performs this private workflow.
+> [!IMPORTANT]
+> Never commit `.env.local` or expose `SUPABASE_SERVICE_ROLE_KEY` or `ADMIN_SECRET` in client components or through `NEXT_PUBLIC_` variables. Row-level security is enforced on the database, and only server-side routes interact with Supabase.
 
-### Real-service smoke test
+### 3. Database Migrations (for Knowledge mode)
 
-Perform this procedure against the configured private Supabase project and Gemini API. It deliberately exercises the visible integrated states as well as the two external services.
+Apply the versioned migrations located in `supabase/migrations/` in ascending order:
 
-1. Start with an empty Knowledge Base. If it contains disposable smoke data, delete that data through the interface. Reload Knowledge and confirm **Loading the Knowledge Base…** resolves to the empty state.
-2. Save and upload `atlas.md` with the exact content below. Observe **indexing**, then **ready**.
+1. `202611030001_create_knowledge_base.sql`
+2. `202611030002_manage_project_documents.sql`
+3. `202611030003_match_ready_document_chunks.sql`
+4. `202611030004_recover_document_indexing.sql`
+5. `202611040001_multi_format_and_hybrid_search.sql`
+
+You can apply them using the Supabase SQL Editor or via the script:
+```sh
+node scripts/apply-migration.mjs
+```
+
+Verify migration ordering and schema invariants:
+
+```sh
+npm run migrations:validate
+```
+
+Optionally, run `supabase/verify_knowledge_schema.sql` in the Supabase SQL editor to confirm that all required functions, vector configurations, and RLS policies are active.
+
+### 4. Run the Development Server
+
+```sh
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+---
+
+## Verification & Testing
+
+Run the complete verification suite:
+
+```sh
+npm run migrations:validate # Verify Supabase migration schema invariants
+npm run lint                # Run ESLint across app and lib
+npm test                    # Run Vitest unit and integration suite
+npm run build               # Verify Next.js production build
+```
+
+The automated test suite verifies:
+- Multi-format file validation, text extraction, and rejection of unsupported formats (e.g., `.docx`).
+- Chunk indexing, content fingerprinting, deduplication, and capacity enforcement (20 documents).
+- Ready-only retrieval, cosine distance filtering, and keyword search via RRF.
+- Grounded Answer synthesis, Insufficient Evidence boundaries, and citation validation.
+- Admin authentication enforcement on document upload, retry, and deletion endpoints.
+- Error handling for transient database and Gemini provider failures.
+
+---
+
+## Knowledge Base Requirements & Invariants
+
+- **Supported Formats**:
+  - Markdown (`.md`, `.markdown`)
+  - Plain text (`.txt`)
+  - PDF (`.pdf`) — extracted server-side via `unpdf`
+  - HTML (`.html`, `.htm`) — sanitized text extraction
+  - JSON (`.json`) — structured textification
+  - CSV (`.csv`) — tabular textification
+- **File Limits**: Maximum 500 KB (512,000 bytes) per document. Word documents (`.docx`), executables, and empty files are rejected with HTTP 415 or 400.
+- **Knowledge Base Capacity**: The shared Knowledge Base holds at most 20 Project Documents (including indexing and failed records).
+- **Embedding Invariants**:
+  - Model: `gemini-embedding-2`
+  - Dimensions: 768
+  - Prefix convention: `Document: ` for Project Document passages; `Query: ` for search queries.
+  - Vectors produced with different models or prefixes must never be mixed.
+- **Hybrid Retrieval**:
+  - Vector similarity using cosine distance operator (`<=>`).
+  - Full-text search using `tsvector` generated column (`chunk_to_tsvector`) and GIN index.
+  - Reciprocal Rank Fusion: $RRF = \frac{1}{60 + r_{\text{vector}}} + \frac{1}{60 + r_{\text{fts}}}$.
+  - Returns top 5 fused chunks.
+
+---
+
+## Real-Service Smoke Test
+
+Perform this procedure against a configured private Supabase project and Gemini API to verify the integrated end-to-end workflow:
+
+1. **Start Empty**: Open **Knowledge**. Ensure the Knowledge Base is empty or delete existing test documents. Confirm "Loading the Knowledge Base…" resolves to the empty state.
+2. **Upload Markdown Document**: Save and upload `atlas.md` with the content below. Confirm status transitions from **indexing** to **ready**.
 
    ```markdown
    # Atlas
@@ -83,7 +161,7 @@ Perform this procedure against the configured private Supabase project and Gemin
    Release review begins at 14:00 UTC.
    ```
 
-3. Save and upload `operations.txt` with the exact content below. Observe **indexing**, then **ready**.
+3. **Upload Text Document**: Save and upload `operations.txt` with the content below. Confirm status transitions from **indexing** to **ready**.
 
    ```text
    The Atlas incident commander is the on-call platform engineer.
@@ -91,95 +169,77 @@ Perform this procedure against the configured private Supabase project and Gemin
    Customer status updates are posted every thirty minutes during an incident.
    ```
 
-4. Ask: `When does Atlas deploy and when does release review begin?` Observe **Searching…**, then a Grounded Answer. Confirm every factual paragraph has a Source Reference to `atlas.md`; select it and verify the heading path, line range, and stored excerpt are shown.
-5. Ask: `What is Atlas's annual infrastructure budget?` Confirm the result is **Insufficient Evidence** and contains neither guessed answer text nor Source References.
-6. Upload the unchanged `atlas.md` again (renaming it is allowed, changing its bytes is not). Confirm duplicate content is rejected and no second Project Document appears.
-7. Exercise a recoverable failure using the real database without relying on an unpredictable provider outage. In the Supabase SQL editor, run the statement below, then reload Knowledge. Confirm `operations.txt` is **failed**, its detail is visible, and **Retry indexing** is offered.
+4. **Verify Grounded Answer**: Ask: `When does Atlas deploy and when does release review begin?`
+   - Observe **Searching…**, followed by a Grounded Answer.
+   - Confirm each factual paragraph has a **Source Reference** pointing to `atlas.md`.
+   - Select the reference to inspect the heading path, line range, and excerpt.
+5. **Verify Insufficient Evidence Boundary**: Ask: `What is Atlas's annual infrastructure budget?`
+   - Confirm the result is **Insufficient Evidence** with no hallucinated answers or references.
+6. **Verify Duplicate Rejection**: Upload the unchanged `atlas.md` again (renaming the file is allowed; changing byte content is not). Confirm duplicate content is rejected.
+7. **Test Transient Failure Handling**: In the Supabase SQL editor, run:
 
    ```sql
    update public.project_documents
    set status = 'failed',
-       failure_detail = 'Manual transient failure for the Week 5 smoke test.',
+       failure_detail = 'Manual transient failure for smoke test.',
        failure_retryable = true,
        updated_at = now()
    where name = 'operations.txt' and status = 'ready';
    ```
 
-8. Choose **Retry indexing**. Observe **Retrying…**/**indexing**, then **ready**. This retry removes prior chunks, calls the real Gemini embedding service again, and completes through the real Supabase lifecycle functions.
-9. In Supabase, copy the `id` returned by `select id from public.project_documents where name = 'operations.txt';`. Delete `operations.txt` in the interface and confirm it disappears. Replace `<copied-id>` below and confirm this read-only query returns `0`, proving cascading chunk deletion:
+   Reload Knowledge. Confirm `operations.txt` displays **failed**, the failure detail is visible, and **Retry indexing** is offered.
+8. **Test Retry**: Choose **Retry indexing**. Confirm the status transitions through **Retrying…** / **indexing** to **ready**.
+9. **Test Cascading Deletion**: Copy the document ID: `select id from public.project_documents where name = 'operations.txt';`. Delete `operations.txt` in the UI. Confirm it disappears from the list, and verify in SQL that chunks were deleted:
 
    ```sql
-   select count(*)
-   from public.document_chunks as chunk
-   where project_document_id = '<copied-id>'::uuid;
+   select count(*) from public.document_chunks where project_document_id = '<copied-id>'::uuid;
    ```
 
-10. Switch to **Chat**, send a simple prompt, and confirm the streaming answer completes. Switch to **Spec**, generate a text-only specification, and confirm the editable structured result still appears. Return to **Knowledge** and confirm its Project Document list remains intact.
+   The count must be `0`.
+10. **Multi-Mode Integration**: Switch to **Chat**, send a message, and verify streaming. Switch to **Spec**, submit a prompt, and verify the editable task card. Return to **Knowledge** and confirm document status remains consistent.
 
-The smoke test is complete only when steps 1–10 pass. If the three external values are unavailable, report the missing credentials as the sole omitted verification; lint, controlled tests, build, and local migration validation must still pass.
+---
 
-### Verification from a clean checkout
+## Progressive Milestones Overview
 
-Run these commands with Node.js 22.13 or newer:
+- **Week 1 · Streaming Chat & Conversational Memory**: Browser-to-server SSE streaming, private server-side key management, web `ReadableStream` decoding, and client-side conversation persistence.
+- **Week 2 · Structured Outputs & Task Specifications**: Non-streaming JSON generation using Gemini response schemas, server-side Zod validation, and editable task cards.
+- **Week 3 · Approved Tool Calling & Local Drafts**: Human approval gate triggering function calling (`create_task_draft`), input/output schema validation, and local draft receipt management.
+- **Week 4 · Multimodal Screenshot Intake**: Direct screenshot upload and paste (PNG/JPEG/WebP up to 5 MB), vision analysis, and conversion to structured task specifications.
+- **Week 5 · Project Knowledge Assistant & Advanced RAG**: Shared Knowledge Base with Supabase Postgres and `pgvector`, multi-format document ingestion, hybrid search with Reciprocal Rank Fusion, deterministic keyword extraction, dual-guardrail pre-checks, admin ingestion protection, and source-grounded answers.
 
-```sh
-npm ci
-npm run migrations:validate
-npm run lint
-npm test
-npm run build
+---
+
+## Project Structure
+
+```text
+├── app/
+│   ├── api/
+│   │   ├── chat/route.ts                      # Streaming chat endpoint (Gemini API)
+│   │   ├── task-spec/route.ts                 # Structured task specification endpoint (text & vision)
+│   │   ├── task-draft/route.ts                # Function calling draft creation endpoint
+│   │   └── knowledge/
+│   │       ├── documents/route.ts             # Project Document upload & listing endpoint
+│   │       ├── documents/[documentId]/        # Document deletion and retry endpoints
+│   │       └── questions/route.ts             # Hybrid search & Grounded Answer endpoint
+│   ├── globals.css                            # Responsive styling & themes
+│   ├── knowledge-panel.tsx                    # Knowledge Base UI, drawer, & visitor Q&A
+│   ├── layout.tsx                             # Root layout & metadata
+│   └── page.tsx                               # Multi-mode navigation, chat, spec, & drafts
+├── lib/
+│   ├── image-upload.ts                        # Screenshot intake validation & limits
+│   ├── task-spec.ts                           # Zod schemas for task specifications & drafts
+│   └── knowledge/
+│       ├── chunks.ts                          # Document chunking & heading extraction
+│       ├── extractors.ts                      # Multi-format parsers (PDF, HTML, JSON, CSV)
+│       ├── indexing.ts                        # Chunk embedding & vector preparation
+│       └── server.ts                          # Supabase client, hybrid search, & admin auth
+├── scripts/
+│   ├── apply-migration.mjs                    # Direct migration runner
+│   └── validate-migrations.mjs                # Migration invariant & ordering validator
+├── supabase/
+│   ├── migrations/                            # Versioned schema migrations
+│   └── verify_knowledge_schema.sql            # Read-only post-migration schema verification
+├── docs/                                      # ADRs, specs, tickets, and agent guidelines
+└── GLOSSARY.md                                # Official domain language & terminology
 ```
-
-The controlled suite covers upload/list/delete/retry behavior, formats and limits, duplicate and capacity enforcement, chunk/source locators, ready-only retrieval, Grounded Answers, Insufficient Evidence, invalid citations, untrusted instructions, and explicit provider/database failures. The real-service procedure above is still required because controlled boundaries cannot prove that the current Gemini and Supabase services interoperate.
-
-## Week 3 milestone: approved tool calling
-
-Create an editable spec in **Spec** mode, review it, and choose **Create draft task**. That explicit click is the human approval boundary. The server then gives Gemini one declared `create_task_draft` tool and forces a function call. It validates both the approved input and Gemini's tool arguments with the same Zod schema used by spec mode, rejects any model changes, and only then executes the local draft function.
-
-The resulting draft receipt is stored with the conversation in browser local storage. It is intentionally not published or sent to an external task system. This keeps the first tool-calling milestone small while demonstrating the important loop: declare a tool, let the model request it, validate arguments, execute application code, and expose a clear approval boundary.
-
-Created drafts also appear in the sidebar's **Draft tasks** section:
-
-- **Open** returns to the originating conversation and focuses the approved spec.
-- **Copy** places a Markdown version of the task, including priority, acceptance criteria, and implementation notes, on the clipboard.
-- **Delete** removes the local draft receipt after confirmation while preserving the editable task spec, so it can be revised and approved again.
-
-The learning-progress menu now marks **Week 3 · Tool calling** as the current milestone and keeps Weeks 1 and 2 visible as completed context.
-
-### Acceptance criteria
-
-- A valid editable task spec shows a **Create draft task** action.
-- No tool is called until the user explicitly selects that action.
-- Gemini can request only the `create_task_draft` tool for this workflow.
-- The server rejects invalid arguments or any change to the approved spec.
-- A successful call returns a draft ID and persists the receipt in the current browser conversation.
-- Created drafts are discoverable from the Draft tasks sidebar section.
-- A draft can be opened, copied as Markdown, or deleted without deleting its source specification.
-- Existing streaming chat and spec generation continue to work unchanged.
-
-### Prerequisite
-
-Use the existing `GEMINI_API_KEY`. No database, authentication provider, or additional package is needed for this local draft milestone. Authentication and a persistent task store are required before replacing the local draft function with a real write to an external system.
-
-## Week 4 milestone: screenshot-to-spec intake
-
-Attach a PNG, JPEG, or WebP product screenshot from the composer, or paste a copied image while the message field is focused. The app automatically switches to **Spec** mode, renders a thumbnail inside the composer, shows the selected-file and processing states, and accepts optional context. `POST /api/task-spec` validates the upload, sends the image and context to Gemini as a multimodal request, and validates the structured result with the same Zod schema used for text requests.
-
-The screenshot is kept only in memory for the request and its submitted-message preview. It is not written to browser storage or a server-side file store. During the current browser session, the user message shows the screenshot above its optional context. After a refresh, conversation history falls back to the filename while preserving the context and resulting editable spec. Draft creation remains a separate, explicit approval step.
-
-### Acceptance criteria
-
-- The composer accepts one PNG, JPEG, or WebP screenshot up to 5 MB.
-- Selecting or pasting a screenshot shows its thumbnail, filename, size, ready state, and a remove action inside the composer.
-- Submitting a screenshot shows a larger preview in the user message for the current browser session and a filename fallback after refresh.
-- Unsupported, mislabeled, or oversized files are rejected at the API boundary; type and size are also checked in the browser for immediate feedback.
-- Optional context and the screenshot are sent to Gemini in one multimodal request.
-- The generated result must pass the existing task-spec Zod schema before it is rendered.
-- The interface distinguishes ready, analyzing, success, and error states.
-- Screenshots are not persisted in browser history or on the server.
-- The returned spec stays editable and requires the existing approval action before draft creation.
-- Text-only specs, streaming chat, and Week 3 draft management continue to work.
-
-### Prerequisite
-
-Use the existing `GEMINI_API_KEY`. Inline image data keeps this milestone stateless and avoids adding storage or another dependency. A persistent file service is only needed later if screenshots must be reused, shared across devices, or retained for audit history.
