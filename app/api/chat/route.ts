@@ -1,4 +1,5 @@
 import { admitPublicAction } from "../../../lib/public-allowance";
+import { GenerationUnavailableError, requestGeneration } from "../../../lib/generation";
 
 export const runtime = "nodejs";
 
@@ -36,20 +37,18 @@ export async function POST(request: Request) {
   const allowanceResponse = await admitPublicAction(request);
   if (allowanceResponse) return allowanceResponse;
 
-  const geminiResponse = await fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:streamGenerateContent?alt=sse",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": process.env.GEMINI_API_KEY
-      },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: "You are a concise, helpful assistant." }] },
-        contents
-      })
+  let geminiResponse: Response;
+  try {
+    geminiResponse = await requestGeneration("streamGenerateContent", process.env.GEMINI_API_KEY, {
+      systemInstruction: { parts: [{ text: "You are a concise, helpful assistant." }] },
+      contents
+    });
+  } catch (error) {
+    if (error instanceof GenerationUnavailableError) {
+      return new Response(error.message, { status: 503 });
     }
-  );
+    throw error;
+  }
 
   if (!geminiResponse.ok || !geminiResponse.body) {
     const error = await geminiResponse.text();
