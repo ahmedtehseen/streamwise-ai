@@ -63,7 +63,7 @@ function geminiFailure(response: Response, operation: "embed" | "answer") {
   if (response.status === 429) {
     return new KnowledgeError("Gemini is temporarily rate limited.", "gemini_throttled", true, 503);
   }
-  if (response.status >= 500) {
+  if (response.status === 408 || response.status >= 500) {
     return new KnowledgeError("Gemini is temporarily unavailable.", "gemini_unavailable", true, 503);
   }
   return new KnowledgeError(
@@ -159,11 +159,16 @@ export async function embedProjectDocumentPassage(text: string, apiKey: string) 
 }
 
 export async function embedProjectQuestion(question: string, apiKey: string) {
-  return requestEmbedding(question, apiKey, {
-    prefix: "Query",
-    responseFailure: (response) => geminiFailure(response, "embed"),
-    invalidEmbedding: () => new KnowledgeError("Gemini returned an invalid question embedding.", "invalid_model_output", false, 502)
-  });
+  try {
+    return await requestEmbedding(question, apiKey, {
+      prefix: "Query",
+      responseFailure: (response) => geminiFailure(response, "embed"),
+      invalidEmbedding: () => new KnowledgeError("Gemini returned an invalid question embedding.", "invalid_model_output", false, 502)
+    });
+  } catch (error) {
+    if (error instanceof KnowledgeError) throw error;
+    throw new KnowledgeError("Gemini is temporarily unavailable.", "gemini_unavailable", true, 503);
+  }
 }
 
 const groundedAnswerSchema = z.discriminatedUnion("outcome", [

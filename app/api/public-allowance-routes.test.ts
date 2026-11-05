@@ -201,7 +201,7 @@ describe("shared public allowance at API route seams", () => {
   });
 
   it("rotates the one-way Visitor identifier at Pacific midnight without sending the raw address", async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ["Date"] });
     stubGemini();
     const { POST } = await import("./task-spec/route");
     vi.setSystemTime(new Date("2026-11-07T07:59:59.000Z"));

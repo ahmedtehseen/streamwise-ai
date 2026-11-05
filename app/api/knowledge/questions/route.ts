@@ -83,17 +83,32 @@ export async function POST(request: Request) {
   try {
     const question = payload.question.trim();
     const searchKeywords = extractSearchKeywords(question);
-    const queryEmbedding = await embedProjectQuestion(question, configuration.geminiApiKey);
+    let degradedSearch = false;
+    let queryEmbedding: number[] | null = null;
+    try {
+      queryEmbedding = await embedProjectQuestion(question, configuration.geminiApiKey);
+    } catch (error) {
+      if (!(error instanceof KnowledgeError) || !error.retryable) throw error;
+      degradedSearch = true;
+    }
 
-    let rpcResult = await client.rpc("match_ready_document_chunks_hybrid", {
-      p_query_embedding: queryEmbedding,
-      p_query_text: searchKeywords,
-      p_match_count: 5,
-      p_embedding_model: EMBEDDING_MODEL,
-      p_embedding_dimension: EMBEDDING_DIMENSION
-    });
+    let rpcResult;
+    if (degradedSearch) {
+      rpcResult = await client.rpc("match_ready_document_chunks_full_text", {
+        p_query_text: searchKeywords,
+        p_match_count: 5
+      });
+    } else {
+      rpcResult = await client.rpc("match_ready_document_chunks_hybrid", {
+        p_query_embedding: queryEmbedding!,
+        p_query_text: searchKeywords,
+        p_match_count: 5,
+        p_embedding_model: EMBEDDING_MODEL,
+        p_embedding_dimension: EMBEDDING_DIMENSION
+      });
+    }
 
-    if (rpcResult.error && (rpcResult.error.message?.includes("function") || rpcResult.error.code === "PGRST202")) {
+    if (!degradedSearch && rpcResult.error && (rpcResult.error.message?.includes("function") || rpcResult.error.code === "PGRST202")) {
       rpcResult = await client.rpc("match_ready_document_chunks", {
         p_query_embedding: queryEmbedding,
         p_match_count: 5,
@@ -106,10 +121,10 @@ export async function POST(request: Request) {
     if (matchError) return failure("The Knowledge Base could not be searched.", "retrieval_unavailable", true, 503);
     const matchedChunks = z.array(matchedChunkSchema).parse(data);
     const relevantChunks = matchedChunks.filter(
-      (chunk) => chunk.cosine_distance <= KNOWLEDGE_DISTANCE_THRESHOLD || (chunk.fts_rank && chunk.fts_rank > 0)
+      (chunk) => (!degradedSearch && chunk.cosine_distance <= KNOWLEDGE_DISTANCE_THRESHOLD) || (chunk.fts_rank && chunk.fts_rank > 0)
     );
     if (relevantChunks.length === 0) {
-      return Response.json({ outcome: "insufficient_evidence", paragraphs: [] });
+      return Response.json({ outcome: "insufficient_evidence", paragraphs: [], ...(degradedSearch ? { degradedSearch: true } : {}) });
     }
 
     // Pass top 3 most relevant passages to optimize prompt processing and generation latency
@@ -117,7 +132,7 @@ export async function POST(request: Request) {
     const evidence = selectedChunks.map((chunk, index) => ({ id: `source-${index + 1}`, text: chunk.text }));
     const answer = await generateGroundedAnswer(question, evidence, configuration.geminiApiKey);
     if (answer.outcome === "insufficient_evidence") {
-      return Response.json({ outcome: "insufficient_evidence", paragraphs: [] });
+      return Response.json({ outcome: "insufficient_evidence", paragraphs: [], ...(degradedSearch ? { degradedSearch: true } : {}) });
     }
 
     const sources = new Map(selectedChunks.map((chunk, index) => [`source-${index + 1}`, chunk]));
@@ -148,7 +163,7 @@ export async function POST(request: Request) {
         })
       };
     });
-    return Response.json({ outcome: "answered", paragraphs });
+    return Response.json({ outcome: "answered", paragraphs, ...(degradedSearch ? { degradedSearch: true } : {}) });
   } catch (error) {
     if (error instanceof KnowledgeError) {
       return failure(error.message, error.code, error.retryable, error.status);
