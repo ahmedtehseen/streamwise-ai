@@ -1,5 +1,6 @@
 import { taskSpecJsonSchema, taskSpecSchema, type TaskSpec } from "../../../lib/task-spec";
 import { admitPublicAction } from "../../../lib/public-allowance";
+import { GenerationUnavailableError, requestGeneration } from "../../../lib/generation";
 
 export const runtime = "nodejs";
 
@@ -19,19 +20,20 @@ export async function POST(request: Request) {
   const allowanceResponse = await admitPublicAction(request);
   if (allowanceResponse) return allowanceResponse;
 
-  const geminiResponse = await fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: `Create a draft task from this human-approved specification. Copy every field exactly and do not add requirements.\n${JSON.stringify(approvedSpec.data)}` }] }],
-        tools: [{ functionDeclarations: [{ name: CREATE_DRAFT_TOOL, description: "Create a local draft task for human review. This never publishes or sends the task.", parameters: taskSpecJsonSchema }] }],
-        toolConfig: { functionCallingConfig: { mode: "ANY", allowedFunctionNames: [CREATE_DRAFT_TOOL] } },
-        generationConfig: { temperature: 0 }
-      })
+  let geminiResponse: Response;
+  try {
+    geminiResponse = await requestGeneration("generateContent", process.env.GEMINI_API_KEY, {
+      contents: [{ role: "user", parts: [{ text: `Create a draft task from this human-approved specification. Copy every field exactly and do not add requirements.\n${JSON.stringify(approvedSpec.data)}` }] }],
+      tools: [{ functionDeclarations: [{ name: CREATE_DRAFT_TOOL, description: "Create a local draft task for human review. This never publishes or sends the task.", parameters: taskSpecJsonSchema }] }],
+      toolConfig: { functionCallingConfig: { mode: "ANY", allowedFunctionNames: [CREATE_DRAFT_TOOL] } },
+      generationConfig: { temperature: 0 }
+    });
+  } catch (error) {
+    if (error instanceof GenerationUnavailableError) {
+      return Response.json({ error: error.message }, { status: 503 });
     }
-  );
+    throw error;
+  }
 
   if (!geminiResponse.ok) {
     if (geminiResponse.status === 429 || geminiResponse.status === 503) return Response.json({ error: "Gemini is temporarily busy. Please try again in a moment." }, { status: 503 });

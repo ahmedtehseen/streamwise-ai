@@ -11,6 +11,7 @@ import {
 } from "../../../../lib/knowledge/server";
 import { z } from "zod";
 import { admitPublicAction } from "../../../../lib/public-allowance";
+import { GenerationUnavailableError } from "../../../../lib/generation";
 
 export const runtime = "nodejs";
 
@@ -150,6 +151,9 @@ export async function POST(request: Request) {
     });
     return Response.json({ outcome: "answered", paragraphs });
   } catch (error) {
+    if (error instanceof GenerationUnavailableError) {
+      return failure(error.message, "generation_unavailable", true, 503);
+    }
     if (error instanceof KnowledgeError) {
       return failure(error.message, error.code, error.retryable, error.status);
     }
