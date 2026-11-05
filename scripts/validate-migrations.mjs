@@ -77,7 +77,15 @@ const requiredFragments = [
   "revoke all on function public.submit_answer_flag",
   "grant execute on function public.submit_answer_flag",
   "revoke all on function public.review_answer_flag",
-  "grant execute on function public.review_answer_flag"
+  "grant execute on function public.review_answer_flag",
+  "replaces_document_id uuid references public.project_documents(id) on delete cascade",
+  "create unique index project_documents_one_pending_replacement",
+  "where replaces_document_id is not null",
+  "count(*) from public.project_documents where knowledge_base_id = requested_knowledge_base_id and replaces_document_id is null",
+  "create or replace function public.begin_project_document_replacement",
+  "create or replace function public.retry_project_document_replacement",
+  "create or replace function public.discard_project_document_replacement",
+  "delete from public.project_documents where id = superseded_document_id"
 ];
 
 for (const fragment of requiredFragments) {
