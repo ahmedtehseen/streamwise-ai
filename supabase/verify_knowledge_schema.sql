@@ -51,4 +51,19 @@ select
     join pg_namespace as namespace on namespace.oid = procedure.pronamespace
     where namespace.nspname = 'public'
       and procedure.proname = 'admit_public_action'
-  ) as public_allowance_admission_ready;
+  ) as public_allowance_admission_ready,
+  exists (
+    select 1
+    from pg_class as class
+    join pg_namespace as namespace on namespace.oid = class.relnamespace
+    where namespace.nspname = 'public'
+      and class.relname = 'answer_flags'
+      and class.relrowsecurity
+  ) as answer_flags_have_rls,
+  (
+    select count(*) = 2
+    from pg_proc as procedure
+    join pg_namespace as namespace on namespace.oid = procedure.pronamespace
+    where namespace.nspname = 'public'
+      and procedure.proname in ('submit_answer_flag', 'review_answer_flag')
+  ) as answer_flag_functions_ready;

@@ -139,6 +139,8 @@ describe("Project Knowledge Assistant question API", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       outcome: "answered",
+      responseId: expect.any(String),
+      respondedAt: expect.any(String),
       paragraphs: [{
         text: "Atlas deploys on Fridays, with release review at 14:00 UTC.",
         sourceReferences: [
@@ -229,7 +231,21 @@ describe("Project Knowledge Assistant question API", () => {
     const response = await ask("What is the Atlas budget?");
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ outcome: "insufficient_evidence", paragraphs: [] });
+    await expect(response.json()).resolves.toEqual({ outcome: "insufficient_evidence", paragraphs: [], responseId: expect.any(String), respondedAt: expect.any(String) });
+  });
+
+  it("issues a server-verifiable identity and response time for every flaggable response", async () => {
+    readyChunk();
+    stubGeminiAnswer({ outcome: "insufficient_evidence", paragraphs: [] });
+
+    const response = await ask("What is the Atlas budget?");
+    const payload = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(payload.responseId).toEqual(expect.any(String));
+    expect(String(payload.responseId)).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+    expect(payload.respondedAt).toEqual(expect.any(String));
+    expect(Number.isNaN(Date.parse(String(payload.respondedAt)))).toBe(false);
   });
 
   it("returns Insufficient Evidence immediately without generating an answer when all chunks exceed the distance threshold", async () => {
@@ -249,7 +265,7 @@ describe("Project Knowledge Assistant question API", () => {
     const response = await ask("What is the Atlas budget?");
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ outcome: "insufficient_evidence", paragraphs: [] });
+    await expect(response.json()).resolves.toEqual({ outcome: "insufficient_evidence", paragraphs: [], responseId: expect.any(String), respondedAt: expect.any(String) });
     expect(requests).toHaveLength(1);
     expect(requests[0].url).toContain(":embedContent");
   });
@@ -277,6 +293,8 @@ describe("Project Knowledge Assistant question API", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       outcome: "answered",
+      responseId: expect.any(String),
+      respondedAt: expect.any(String),
       paragraphs: [{
         text: "Ahmed boosted pgvector performance by 8x.",
         sourceReferences: [{
@@ -323,6 +341,8 @@ describe("Project Knowledge Assistant question API", () => {
     await expect(response.json()).resolves.toEqual({
       outcome: "answered",
       degradedSearch: true,
+      responseId: expect.any(String),
+      respondedAt: expect.any(String),
       paragraphs: [{
         text: "Ahmed boosted pgvector performance by 8x.",
         sourceReferences: [{
@@ -357,7 +377,9 @@ describe("Project Knowledge Assistant question API", () => {
     await expect(response.json()).resolves.toEqual({
       outcome: "insufficient_evidence",
       paragraphs: [],
-      degradedSearch: true
+      degradedSearch: true,
+      responseId: expect.any(String),
+      respondedAt: expect.any(String)
     });
     expect(database.rpcCalls).toEqual([{
       name: "match_ready_document_chunks_full_text",
@@ -377,7 +399,9 @@ describe("Project Knowledge Assistant question API", () => {
     await expect(response.json()).resolves.toEqual({
       outcome: "insufficient_evidence",
       paragraphs: [],
-      degradedSearch: true
+      degradedSearch: true,
+      responseId: expect.any(String),
+      respondedAt: expect.any(String)
     });
     expect(database.rpcCalls[0].name).toBe("match_ready_document_chunks_full_text");
   });
@@ -395,7 +419,9 @@ describe("Project Knowledge Assistant question API", () => {
     await expect(response.json()).resolves.toEqual({
       outcome: "insufficient_evidence",
       paragraphs: [],
-      degradedSearch: true
+      degradedSearch: true,
+      responseId: expect.any(String),
+      respondedAt: expect.any(String)
     });
     expect(database.rpcCalls[0].name).toBe("match_ready_document_chunks_full_text");
   });

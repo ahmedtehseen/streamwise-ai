@@ -12,6 +12,7 @@ import {
 import { z } from "zod";
 import { admitPublicAction } from "../../../../lib/public-allowance";
 import { GenerationUnavailableError } from "../../../../lib/generation";
+import { issueAnswerResponseIdentity } from "../../../../lib/knowledge/answer-flags";
 
 export const runtime = "nodejs";
 
@@ -29,6 +30,27 @@ const matchedChunkSchema = z.object({
 
 function failure(error: string, code: string, retryable: boolean, status: number) {
   return Response.json({ error, code, retryable }, { status });
+}
+
+function flaggableResponse(
+  question: string,
+  response: {
+    outcome: "answered" | "insufficient_evidence";
+    paragraphs: Array<{
+      text: string;
+      sourceReferences: Array<{
+        id: string;
+        documentName: string;
+        headingPath: string[];
+        startLine: number;
+        endLine: number;
+        excerpt: string;
+      }>;
+    }>;
+    degradedSearch?: boolean;
+  }
+) {
+  return Response.json({ ...response, ...issueAnswerResponseIdentity(question, response) });
 }
 
 let cachedReadyDocumentCount: { count: number; timestamp: number } | null = null;
@@ -125,7 +147,7 @@ export async function POST(request: Request) {
       (chunk) => (!degradedSearch && chunk.cosine_distance <= KNOWLEDGE_DISTANCE_THRESHOLD) || (chunk.fts_rank && chunk.fts_rank > 0)
     );
     if (relevantChunks.length === 0) {
-      return Response.json({ outcome: "insufficient_evidence", paragraphs: [], ...(degradedSearch ? { degradedSearch: true } : {}) });
+      return flaggableResponse(question, { outcome: "insufficient_evidence", paragraphs: [], ...(degradedSearch ? { degradedSearch: true } : {}) });
     }
 
     // Pass top 3 most relevant passages to optimize prompt processing and generation latency
@@ -133,7 +155,7 @@ export async function POST(request: Request) {
     const evidence = selectedChunks.map((chunk, index) => ({ id: `source-${index + 1}`, text: chunk.text }));
     const answer = await generateGroundedAnswer(question, evidence, configuration.geminiApiKey);
     if (answer.outcome === "insufficient_evidence") {
-      return Response.json({ outcome: "insufficient_evidence", paragraphs: [], ...(degradedSearch ? { degradedSearch: true } : {}) });
+      return flaggableResponse(question, { outcome: "insufficient_evidence", paragraphs: [], ...(degradedSearch ? { degradedSearch: true } : {}) });
     }
 
     const sources = new Map(selectedChunks.map((chunk, index) => [`source-${index + 1}`, chunk]));
@@ -164,7 +186,7 @@ export async function POST(request: Request) {
         })
       };
     });
-    return Response.json({ outcome: "answered", paragraphs, ...(degradedSearch ? { degradedSearch: true } : {}) });
+    return flaggableResponse(question, { outcome: "answered", paragraphs, ...(degradedSearch ? { degradedSearch: true } : {}) });
   } catch (error) {
     if (error instanceof GenerationUnavailableError) {
       return failure(error.message, "generation_unavailable", true, 503);

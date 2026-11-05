@@ -67,7 +67,17 @@ const requiredFragments = [
   "v_visitor_day >= 10",
   "v_global_day >= 50",
   "revoke all on function public.admit_public_action",
-  "grant execute on function public.admit_public_action"
+  "grant execute on function public.admit_public_action",
+  "create table public.answer_flags",
+  "unique (response_fingerprint)",
+  "char_length(visitor_note) <= 500",
+  "alter table public.answer_flags enable row level security",
+  "create or replace function public.submit_answer_flag",
+  "create or replace function public.review_answer_flag",
+  "revoke all on function public.submit_answer_flag",
+  "grant execute on function public.submit_answer_flag",
+  "revoke all on function public.review_answer_flag",
+  "grant execute on function public.review_answer_flag"
 ];
 
 for (const fragment of requiredFragments) {
