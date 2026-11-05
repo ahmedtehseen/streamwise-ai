@@ -18,6 +18,7 @@ const submissionSchema = z.object({
 
 type AnswerFlagRecord = {
   id: string;
+  response_id: string | null;
   question: string;
   outcome: "answered" | "insufficient_evidence";
   response_content: { paragraphs: unknown[]; degradedSearch: boolean };
@@ -32,6 +33,7 @@ type AnswerFlagRecord = {
 function publicAnswerFlag(flag: AnswerFlagRecord) {
   return {
     id: flag.id,
+    responseId: flag.response_id,
     question: flag.question,
     outcome: flag.outcome,
     responseContent: flag.response_content,
@@ -63,6 +65,7 @@ export async function POST(request: Request) {
     const sourceReferences = snapshot.paragraphs.flatMap((paragraph) => paragraph.sourceReferences);
     const { data, error } = await client.rpc("submit_answer_flag", {
       p_flag: {
+        response_id: parsed.data.responseId,
         response_fingerprint: answerResponseFingerprint(parsed.data.responseId),
         question: snapshot.question,
         outcome: snapshot.outcome,
@@ -97,7 +100,7 @@ export async function GET(request: Request) {
     const client = createKnowledgeClient(configuration.supabaseUrl, configuration.serviceRoleKey);
     const { data, error } = await client
       .from("answer_flags")
-      .select("id,question,outcome,response_content,source_references,responded_at,visitor_note,status,reviewed_at,created_at")
+      .select("id,response_id,question,outcome,response_content,source_references,responded_at,visitor_note,status,reviewed_at,created_at")
       .order("created_at", { ascending: false });
     if (error) return Response.json({ error: "Answer Flags could not be loaded." }, { status: 502 });
     return Response.json({ flags: (data as AnswerFlagRecord[]).map(publicAnswerFlag) });

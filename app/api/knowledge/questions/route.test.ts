@@ -326,7 +326,7 @@ describe("Portfolio Assistant question API", () => {
     let providerRequest = 0;
     vi.stubGlobal("fetch", vi.fn(async () => {
       providerRequest += 1;
-      if (providerRequest === 1) {
+      if (providerRequest <= 2) {
         return Response.json({ error: { message: "quota exhausted" } }, { status: 429 });
       }
       return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({
@@ -359,7 +359,7 @@ describe("Portfolio Assistant question API", () => {
       name: "match_ready_document_chunks_full_text",
       parameters: { p_query_text: "Ahmed pgvector performance", p_match_count: 5 }
     }]);
-    expect(providerRequest).toBe(2);
+    expect(providerRequest).toBe(3);
   });
 
   it("returns visibly degraded Insufficient Evidence without answer generation when full-text search finds no keyword evidence", async () => {
@@ -385,7 +385,7 @@ describe("Portfolio Assistant question API", () => {
       name: "match_ready_document_chunks_full_text",
       parameters: { p_query_text: "Atlas budget", p_match_count: 5 }
     }]);
-    expect(provider).toHaveBeenCalledTimes(1);
+    expect(provider).toHaveBeenCalledTimes(2);
   });
 
   it("degrades retrieval after an Embedding 2 request timeout", async () => {
@@ -460,7 +460,7 @@ describe("Portfolio Assistant question API", () => {
     let providerRequest = 0;
     vi.stubGlobal("fetch", vi.fn(async () => {
       providerRequest += 1;
-      if (providerRequest === 1) {
+      if (providerRequest <= 2) {
         return Response.json({ error: { message: "temporarily unavailable" } }, { status: 503 });
       }
       return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({
@@ -530,6 +530,30 @@ describe("Portfolio Assistant question API", () => {
     expect(response.status).toBe(responseStatus);
     await expect(response.json()).resolves.toEqual({ error, code, retryable });
     expect(database.rpcCalls).toHaveLength(0);
+  });
+
+  it("retries an eligible embedding failure once with bounded backoff before degrading", async () => {
+    readyChunk();
+    database.storedChunks = [];
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const delays: number[] = [];
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((handler: TimerHandler, delay?: number) => {
+      delays.push(delay ?? 0);
+      queueMicrotask(() => typeof handler === "function" && handler());
+      return 1;
+    }) as typeof setTimeout);
+    const provider = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: { message: "temporarily unavailable" } }, { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ embedding: { values: [1, ...Array.from({ length: 767 }, () => 0)] } }));
+    vi.stubGlobal("fetch", provider);
+
+    const response = await ask();
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ outcome: "insufficient_evidence" });
+    expect(provider).toHaveBeenCalledTimes(2);
+    expect(delays).toEqual([150]);
+    expect(database.rpcCalls[0].name).toBe("match_ready_document_chunks_hybrid");
   });
 
   it("rejects an incompatible query embedding instead of degrading or mixing vector spaces", async () => {

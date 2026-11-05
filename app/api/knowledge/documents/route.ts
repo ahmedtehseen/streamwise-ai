@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import { ProjectDocumentRecord, publicProjectDocument, runProjectDocumentIndexing } from "../../../../lib/knowledge/indexing";
+import { ProjectDocumentIntakeError, readProjectDocument } from "../../../../lib/knowledge/document-intake";
 import {
   createKnowledgeClient,
   KNOWLEDGE_BASE_ID,
@@ -7,37 +7,9 @@ import {
   knowledgeConfiguration,
   verifyAdminAccess
 } from "../../../../lib/knowledge/server";
-import { extractTextFromBuffer, SupportedMediaType } from "../../../../lib/knowledge/extractors";
 import { invalidateReadyDocumentCountCache } from "../questions/route";
 
 export const runtime = "nodejs";
-const MAX_DOCUMENT_BYTES = 500 * 1024;
-
-function mediaTypeFor(file: File): SupportedMediaType | null {
-  const lowerName = file.name.toLowerCase();
-  const browserType = file.type.toLowerCase();
-  const browserDidNotReportType = browserType === "" || browserType === "application/octet-stream";
-
-  if (
-    (lowerName.endsWith(".md") || lowerName.endsWith(".markdown"))
-    && (browserDidNotReportType || browserType === "text/markdown" || browserType === "text/plain")
-  ) return "text/markdown";
-  if (lowerName.endsWith(".txt") && (browserDidNotReportType || browserType === "text/plain")) return "text/plain";
-  if (lowerName.endsWith(".pdf") && (browserDidNotReportType || browserType === "application/pdf")) return "application/pdf";
-  if ((lowerName.endsWith(".html") || lowerName.endsWith(".htm")) && (browserDidNotReportType || browserType === "text/html")) return "text/html";
-  if (lowerName.endsWith(".json") && (browserDidNotReportType || browserType === "application/json" || browserType === "text/plain")) return "application/json";
-  if (lowerName.endsWith(".csv") && (browserDidNotReportType || browserType === "text/csv" || browserType === "application/vnd.ms-excel" || browserType === "text/plain")) return "text/csv";
-  return null;
-}
-
-function looksBinary(bytes: Uint8Array) {
-  if (bytes.includes(0)) return true;
-  let suspiciousBytes = 0;
-  for (const byte of bytes) {
-    if (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) suspiciousBytes += 1;
-  }
-  return suspiciousBytes / bytes.length > 0.1;
-}
 
 export async function GET() {
   try {
@@ -81,30 +53,14 @@ export async function POST(request: Request) {
   const documentFile = formData?.get("document");
   if (!(documentFile instanceof File)) return Response.json({ error: "Choose a Project Document to upload." }, { status: 400 });
 
-  const lowerName = documentFile.name.toLowerCase();
-  if (lowerName.endsWith(".docx") || lowerName.endsWith(".doc")) {
-    return Response.json({ error: "Word documents (.docx) are not supported. Please upload a PDF, Markdown, or text document." }, { status: 415 });
-  }
-
-  const mediaType = mediaTypeFor(documentFile);
-  if (!mediaType) return Response.json({ error: "Use a supported Project Document (.md, .txt, .pdf, .html, .json, .csv)." }, { status: 415 });
-  if (documentFile.size === 0) return Response.json({ error: "The Project Document is empty." }, { status: 400 });
-  if (documentFile.size > MAX_DOCUMENT_BYTES) return Response.json({ error: "Keep the Project Document at or below 500 KB." }, { status: 413 });
-
-  const bytes = new Uint8Array(await documentFile.arrayBuffer());
-  const fingerprint = createHash("sha256").update(bytes).digest("hex");
-  if (mediaType !== "application/pdf" && looksBinary(bytes)) {
-    return Response.json({ error: "The Project Document appears to contain binary content." }, { status: 415 });
-  }
-
-  let text: string;
+  let intake: Awaited<ReturnType<typeof readProjectDocument>>;
   try {
-    text = await extractTextFromBuffer(bytes, mediaType);
+    intake = await readProjectDocument(documentFile);
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "The Project Document could not be parsed." }, { status: 415 });
+    if (error instanceof ProjectDocumentIntakeError) return Response.json({ error: error.message }, { status: error.status });
+    throw error;
   }
-
-  if (!text.trim()) return Response.json({ error: "The Project Document is empty." }, { status: 400 });
+  const { mediaType, text, fingerprint } = intake;
   const client = createKnowledgeClient(configuration.supabaseUrl, configuration.serviceRoleKey);
   const { data: indexingDocument, error: insertError } = await client.rpc("begin_project_document_indexing", {
     p_document: {

@@ -71,6 +71,8 @@ const requiredFragments = [
   "grant execute on function public.admit_public_action",
   "create table public.answer_flags",
   "unique (response_fingerprint)",
+  "add column response_id text",
+  "p_flag->>'response_id'",
   "char_length(visitor_note) <= 500",
   "alter table public.answer_flags enable row level security",
   "create or replace function public.submit_answer_flag",

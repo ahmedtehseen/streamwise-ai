@@ -201,6 +201,30 @@ describe("compatible generation fallback at API route seams", () => {
     expect(database.admissionCalls).toBe(1);
   });
 
+  it("returns stable unavailable Chat behavior instead of an upstream body or status", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("provider secret: invalid project", { status: 418 })));
+    const { POST } = await import("./chat/route");
+
+    const response = await POST(routeRequest("/api/chat", { messages: [{ role: "user", content: "Hello" }] }));
+
+    expect(response.status).toBe(503);
+    await expect(response.text()).resolves.toBe("Generation is temporarily unavailable. Please try again later.");
+  });
+
+  it("does not leak a non-daily secondary failure after primary daily exhaustion", async () => {
+    const provider = vi.fn()
+      .mockResolvedValueOnce(dailyQuotaResponse())
+      .mockResolvedValueOnce(new Response("secondary provider account detail", { status: 403 }));
+    vi.stubGlobal("fetch", provider);
+    const { POST } = await import("./chat/route");
+
+    const response = await POST(routeRequest("/api/chat", { messages: [{ role: "user", content: "Hello" }] }));
+
+    expect(response.status).toBe(503);
+    await expect(response.text()).resolves.toBe("Generation is temporarily unavailable. Please try again later.");
+    expect(provider).toHaveBeenCalledTimes(2);
+  });
+
   it("applies the existing Spec schema to invalid secondary output", async () => {
     const provider = vi.fn()
       .mockResolvedValueOnce(dailyQuotaResponse())

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type StoredFlag = {
   id: string;
+  response_id: string;
   response_fingerprint: string;
   question: string;
   outcome: "answered" | "insufficient_evidence";
@@ -159,6 +160,7 @@ describe("Answer Flag API", () => {
     });
     expect(database.flags).toHaveLength(1);
     expect(database.flags[0]).toMatchObject({
+      response_id: issued.responseId,
       question: "When does Atlas deploy?",
       outcome: "answered",
       response_content: {
@@ -259,6 +261,7 @@ describe("Answer Flag API", () => {
     expect(payload.flags).toHaveLength(2);
     expect(payload.flags.map((flag) => flag.status)).toEqual(["open", "reviewed"]);
     expect(payload.flags[0]).toMatchObject({
+      responseId: openIssued.responseId,
       question: "When does Atlas deploy?",
       outcome: "answered",
       note: "Check this answer.",

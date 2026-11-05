@@ -1,31 +1,9 @@
-import { createHash } from "node:crypto";
 import { ProjectDocumentRecord, publicProjectDocument, runProjectDocumentIndexing } from "../../../../../../lib/knowledge/indexing";
+import { ProjectDocumentIntakeError, readProjectDocument } from "../../../../../../lib/knowledge/document-intake";
 import { createKnowledgeClient, KNOWLEDGE_BASE_ID, knowledgeConfiguration, knowledgeDatabaseConfiguration, verifyAdminAccess } from "../../../../../../lib/knowledge/server";
-import { extractTextFromBuffer, SupportedMediaType } from "../../../../../../lib/knowledge/extractors";
 import { invalidateReadyDocumentCountCache } from "../../../questions/route";
 
 export const runtime = "nodejs";
-const MAX_DOCUMENT_BYTES = 500 * 1024;
-
-function mediaTypeFor(file: File): SupportedMediaType | null {
-  const name = file.name.toLowerCase();
-  const type = file.type.toLowerCase();
-  const unspecified = type === "" || type === "application/octet-stream";
-  if ((name.endsWith(".md") || name.endsWith(".markdown")) && (unspecified || type === "text/markdown" || type === "text/plain")) return "text/markdown";
-  if (name.endsWith(".txt") && (unspecified || type === "text/plain")) return "text/plain";
-  if (name.endsWith(".pdf") && (unspecified || type === "application/pdf")) return "application/pdf";
-  if ((name.endsWith(".html") || name.endsWith(".htm")) && (unspecified || type === "text/html")) return "text/html";
-  if (name.endsWith(".json") && (unspecified || type === "application/json" || type === "text/plain")) return "application/json";
-  if (name.endsWith(".csv") && (unspecified || type === "text/csv" || type === "application/vnd.ms-excel" || type === "text/plain")) return "text/csv";
-  return null;
-}
-
-function looksBinary(bytes: Uint8Array) {
-  if (bytes.includes(0)) return true;
-  let suspicious = 0;
-  for (const byte of bytes) if (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) suspicious += 1;
-  return suspicious / bytes.length > 0.1;
-}
 
 export async function POST(request: Request, context: { params: Promise<{ documentId: string }> }) {
   if (!verifyAdminAccess(request)) {
@@ -42,23 +20,14 @@ export async function POST(request: Request, context: { params: Promise<{ docume
   const formData = await request.formData().catch(() => null);
   const documentFile = formData?.get("document");
   if (!(documentFile instanceof File)) return Response.json({ error: "Choose a replacement Project Document." }, { status: 400 });
-  if (documentFile.name.toLowerCase().endsWith(".docx") || documentFile.name.toLowerCase().endsWith(".doc")) {
-    return Response.json({ error: "Word documents (.docx) are not supported. Please upload a PDF, Markdown, or text document." }, { status: 415 });
-  }
-  const mediaType = mediaTypeFor(documentFile);
-  if (!mediaType) return Response.json({ error: "Use a supported Project Document (.md, .txt, .pdf, .html, .json, .csv)." }, { status: 415 });
-  if (documentFile.size === 0) return Response.json({ error: "The replacement Project Document is empty." }, { status: 400 });
-  if (documentFile.size > MAX_DOCUMENT_BYTES) return Response.json({ error: "Keep the replacement Project Document at or below 500 KB." }, { status: 413 });
-
-  const bytes = new Uint8Array(await documentFile.arrayBuffer());
-  if (mediaType !== "application/pdf" && looksBinary(bytes)) return Response.json({ error: "The replacement Project Document appears to contain binary content." }, { status: 415 });
-  let text: string;
+  let intake: Awaited<ReturnType<typeof readProjectDocument>>;
   try {
-    text = await extractTextFromBuffer(bytes, mediaType);
+    intake = await readProjectDocument(documentFile, true);
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "The replacement Project Document could not be parsed." }, { status: 415 });
+    if (error instanceof ProjectDocumentIntakeError) return Response.json({ error: error.message }, { status: error.status });
+    throw error;
   }
-  if (!text.trim()) return Response.json({ error: "The replacement Project Document is empty." }, { status: 400 });
+  const { mediaType, text, fingerprint } = intake;
 
   const { documentId } = await context.params;
   const client = createKnowledgeClient(configuration.supabaseUrl, configuration.serviceRoleKey);
@@ -70,7 +39,7 @@ export async function POST(request: Request, context: { params: Promise<{ docume
       media_type: mediaType,
       byte_size: documentFile.size,
       original_text: text,
-      content_fingerprint: createHash("sha256").update(bytes).digest("hex"),
+      content_fingerprint: fingerprint,
       status: "indexing"
     }
   });

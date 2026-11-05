@@ -1,5 +1,4 @@
-import { admitPublicAction } from "../../../lib/public-allowance";
-import { GenerationUnavailableError, requestGeneration } from "../../../lib/generation";
+import { generationUnavailableResponse, requestPublicGeneration } from "../../../lib/public-generation";
 
 export const runtime = "nodejs";
 
@@ -34,27 +33,15 @@ export async function POST(request: Request) {
     });
   }
 
-  const allowanceResponse = await admitPublicAction(request);
-  if (allowanceResponse) return allowanceResponse;
-
-  let geminiResponse: Response;
-  try {
-    geminiResponse = await requestGeneration("streamGenerateContent", process.env.GEMINI_API_KEY, {
+  const generation = await requestPublicGeneration(request, "streamGenerateContent", process.env.GEMINI_API_KEY, {
       systemInstruction: { parts: [{ text: "You are a concise, helpful assistant." }] },
       contents
-    });
-  } catch (error) {
-    if (error instanceof GenerationUnavailableError) {
-      return new Response(error.message, { status: 503 });
-    }
-    throw error;
-  }
+    }, "text");
+  if ("publicResponse" in generation) return generation.publicResponse;
+  const geminiResponse = generation.providerResponse;
 
   if (!geminiResponse.ok || !geminiResponse.body) {
-    const error = await geminiResponse.text();
-    return new Response(error || "Gemini could not start the stream.", {
-      status: geminiResponse.status || 502
-    });
+    return generationUnavailableResponse("text");
   }
 
   const upstreamReader = geminiResponse.body.getReader();
