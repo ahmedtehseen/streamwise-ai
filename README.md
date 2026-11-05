@@ -40,15 +40,15 @@ It uses the existing `GEMINI_API_KEY`; no database, authentication, or new servi
 
 ## Week 5 milestone: Grounded Answers
 
-Knowledge mode introduces a shared private Knowledge Base backed by Supabase Postgres and pgvector. After a Project Document is ready, a question retrieves the five closest ready passages and returns either a structured Grounded Answer or Insufficient Evidence. Select a Source Reference to inspect its trusted document name, heading path, line range, and stored excerpt.
+Knowledge mode introduces a shared private Knowledge Base backed by Supabase Postgres and pgvector. After a Project Document is ready, a question combines vector similarity and PostgreSQL full-text search with reciprocal rank fusion, then returns either a structured Grounded Answer or Insufficient Evidence. Select a Source Reference to inspect its trusted document name, heading path, line range, and stored excerpt.
 
-This milestone is intentionally a private, local workflow with one shared Knowledge Base. It has no authentication, user ownership, or document permissions. Do not expose Knowledge mode publicly; those access boundaries belong to Week 6.
+This milestone still uses one shared Knowledge Base without user accounts, ownership, or per-document permissions. Setting `ADMIN_SECRET` protects document upload, retry, and deletion with a shared owner key while keeping the question interface available to visitors. Keep the Knowledge Base private until full access boundaries are implemented.
 
 ### Requirements and limits
 
 - Node.js 22.13 or newer and npm.
 - A private Supabase project and a Gemini API key.
-- UTF-8 Markdown (`.md` or `.markdown`, `text/markdown`) and plain text (`.txt`, `text/plain`) are the only accepted formats. The extension is always required and must agree with the reported MIME type. Because browsers may report Markdown as `text/plain`, or may report an empty or generic `application/octet-stream` MIME type for these text extensions, those browser fallbacks are accepted only when the extension is supported. Empty, binary-looking, unsupported, and larger-than-500-KB (512,000-byte) uploads are rejected.
+- Markdown (`.md` or `.markdown`), plain text (`.txt`), PDF (`.pdf`), HTML (`.html` or `.htm`), JSON (`.json`), and CSV (`.csv`) are accepted. Text-based formats must contain valid UTF-8. The extension is required and must agree with the reported MIME type, with explicit fallbacks for browsers that report an empty, generic, or text MIME type for a supported extension. Empty, malformed, unsupported, and larger-than-500-KB (512,000-byte) uploads are rejected; Word documents are intentionally unsupported.
 - The shared Knowledge Base holds at most 20 Project Documents, including indexing and failed records.
 - Every stored vector uses `gemini-embedding-2`, 768 dimensions, `Document: ` for Project Document passages, and `Query: ` for questions. Changing the model, dimension, or prefix convention requires re-indexing every Project Document; vectors produced with different invariants must never be mixed.
 
@@ -58,10 +58,11 @@ This milestone is intentionally a private, local workflow with one shared Knowle
 2. Create a private Supabase project. In its SQL editor, apply every file under `supabase/migrations` once, in filename order. The files are append-only, uniquely versioned schema history; do not combine, reorder, or edit an already-applied migration.
 3. Run `npm run migrations:validate`. This verifies local migration order and the required pgvector, security, lifecycle, retrieval, and embedding invariants.
 4. In the Supabase SQL editor, run `supabase/verify_knowledge_schema.sql` after the migrations. Every value in its single result row must be `true`. This confirms the applied database, not only the checked-in files.
-5. Copy `.env.example` (or `.env.local.example`) to `.env.local` and set all three server values:
+5. Copy `.env.example` (or `.env.local.example`) to `.env.local` and set all four server values:
    - `GEMINI_API_KEY`: a Gemini API key allowed to call the embedding and answer models.
    - `SUPABASE_URL`: the project URL from Supabase **Project Settings → API**.
    - `SUPABASE_SERVICE_ROLE_KEY`: the project's service-role secret from the same settings page. This is privileged and server-only.
+   - `ADMIN_SECRET`: a strong shared owner key required for document upload, retry, and deletion. Leave it unset only for a private local development workflow.
 6. Run `npm run dev`, visit `http://localhost:3000`, and open **Knowledge**.
 
 Never commit `.env.local`, print secrets into logs or screenshots, use the service-role key in a browser component, or expose it through a `NEXT_PUBLIC_` variable. The migrations enable row-level security without browser policies; only the server-side client performs this private workflow.
