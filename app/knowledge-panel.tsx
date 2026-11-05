@@ -434,9 +434,9 @@ export default function KnowledgePanel() {
       <div className="knowledge-canvas">
         <header className="knowledge-intro">
           <div>
-            <p className="eyebrow">Shared private Knowledge Base</p>
-            <h2 id="knowledge-heading">Ask your project</h2>
-            <p>Get answers grounded in the documents your team has added.</p>
+            <p className="eyebrow">Portfolio Assistant</p>
+            <h2 id="knowledge-heading">Ask about the Portfolio Owner</h2>
+            <p>Get answers grounded in Project Documents selected by the Portfolio Owner.</p>
           </div>
           <button
             ref={drawerTriggerRef}

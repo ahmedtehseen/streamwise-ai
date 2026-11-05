@@ -518,7 +518,7 @@ describe("Knowledge Project Document API", () => {
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({
-      error: "Unauthorized. An Admin Key is required to upload Project Documents."
+      error: "Unauthorized. The Portfolio Owner secret is required to upload Project Documents."
     });
     delete process.env.ADMIN_SECRET;
   });
