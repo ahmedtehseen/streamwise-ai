@@ -47,11 +47,11 @@ Release review begins at 14:00 UTC.
 
 Confirm indexing becomes ready. Ask `When does Atlas deploy and when does release review begin?` and require a Grounded Answer whose factual paragraphs each include a Source Reference to the temporary Project Document. Ask `What is Atlas's annual infrastructure budget?` and require Insufficient Evidence with no invented answer.
 
-When `gemini-embedding-2` returns an eligible temporary HTTP 408, 429, or 5xx for the configured project, ask `When does Atlas production deploy?`. Require the visible reduced-recall disclosure and a Grounded Answer with a valid Source Reference. Ask the budget question again and require visibly degraded Insufficient Evidence without answer generation. Authentication failure and an invalid-dimension vector must return an error, not degraded retrieval. If eligible provider failure cannot be induced safely, record this step as blocked by provider state.
+When `gemini-embedding-2` returns an eligible temporary HTTP 408, 429, or 5xx for the configured project, confirm Streamwise makes one bounded retry before asking `When does Atlas production deploy?`. Require the visible reduced-recall disclosure only after both eligible attempts fail, plus a Grounded Answer with a valid Source Reference. Ask the budget question again and require visibly degraded Insufficient Evidence without answer generation. Authentication failure and an invalid-dimension vector must return an error, not degraded retrieval. If eligible provider failure cannot be induced safely, record this step as blocked by provider state.
 
 ## 4. Answer Flag workflow
 
-Flag both the Grounded Answer and the Insufficient Evidence response, including a short note on one. Confirm each submission succeeds without Visitor identity storage and a second submission for the same issued response is rejected. Open owner review using the Portfolio Owner secret, confirm both immutable response snapshots and Source References are present, mark one Answer Flag reviewed, and confirm the response and Knowledge Base did not change.
+Flag both the Grounded Answer and the Insufficient Evidence response, including a short note on one. Confirm each submission succeeds without Visitor identity storage and a second submission for the same issued response is rejected. Open owner review using the Portfolio Owner secret, confirm the exact server-issued response identifier, immutable response snapshot, and Source References are present, mark one Answer Flag reviewed, and confirm the response and Knowledge Base did not change.
 
 ## 5. Document Replacement isolation and atomic activation
 

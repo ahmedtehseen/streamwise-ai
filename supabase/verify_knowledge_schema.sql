@@ -77,6 +77,12 @@ select
       and class.relname = 'answer_flags'
       and class.relrowsecurity
   ) as answer_flags_have_rls,
+  exists (
+    select 1 from pg_attribute
+    where attrelid = 'public.answer_flags'::regclass
+      and attname = 'response_id'
+      and not attisdropped
+  ) as answer_flags_preserve_response_identity,
   (
     select count(*) = 2
     from pg_proc as procedure

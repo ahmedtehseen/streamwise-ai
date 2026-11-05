@@ -8,6 +8,8 @@ export const KNOWLEDGE_BASE_ID = "00000000-0000-0000-0000-000000000001";
 export const EMBEDDING_MODEL = "gemini-embedding-2";
 export const EMBEDDING_DIMENSION = 768;
 export const KNOWLEDGE_DISTANCE_THRESHOLD = 0.7;
+const EMBEDDING_RETRY_BASE_MS = 100;
+const EMBEDDING_RETRY_JITTER_MS = 100;
 
 const STOP_WORDS = new Set([
   "a", "about", "an", "and", "are", "as", "at", "be", "by", "can", "could", "did", "do",
@@ -159,16 +161,26 @@ export async function embedProjectDocumentPassage(text: string, apiKey: string) 
 }
 
 export async function embedProjectQuestion(question: string, apiKey: string) {
-  try {
-    return await requestEmbedding(question, apiKey, {
+  const request = () => requestEmbedding(question, apiKey, {
       prefix: "Query",
       responseFailure: (response) => geminiFailure(response, "embed"),
       invalidEmbedding: () => new KnowledgeError("Gemini returned an invalid question embedding.", "invalid_model_output", false, 502)
     });
-  } catch (error) {
-    if (error instanceof KnowledgeError) throw error;
-    throw new KnowledgeError("Gemini is temporarily unavailable.", "gemini_unavailable", true, 503);
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await request();
+    } catch (error) {
+      const knowledgeError = error instanceof KnowledgeError
+        ? error
+        : new KnowledgeError("Gemini is temporarily unavailable.", "gemini_unavailable", true, 503);
+      if (!knowledgeError.retryable || attempt === 1) throw knowledgeError;
+      const delay = EMBEDDING_RETRY_BASE_MS + Math.floor(Math.random() * EMBEDDING_RETRY_JITTER_MS);
+      await new Promise<void>((resolve) => setTimeout(resolve, delay));
+    }
   }
+
+  throw new KnowledgeError("Gemini is temporarily unavailable.", "gemini_unavailable", true, 503);
 }
 
 const groundedAnswerSchema = z.discriminatedUnion("outcome", [

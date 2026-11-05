@@ -91,6 +91,7 @@ Apply the versioned migrations located in `supabase/migrations/` in ascending or
 8. `202611060003_replace_project_documents.sql`
 9. `202611060004_capture_answer_flags.sql`
 10. `202611060005_align_portfolio_assistant_language.sql`
+11. `202611060006_preserve_answer_response_identity.sql`
 
 Apply incremental migrations to an existing project with the Supabase SQL Editor. For a new empty project, the helper applies the complete ordered set in one transaction and refuses to run when Streamwise application tables already exist:
 ```sh
@@ -170,7 +171,7 @@ The automated test suite verifies:
 
 ## Real-Service Smoke Test
 
-Follow [the complete Week 6 real-service smoke procedure](docs/real-service-smoke.md) against the configured Supabase project and Gemini API. It covers shared Visitor/global allowance outcomes, primary generation and compatible fallback, visibly degraded retrieval, Grounded Answers and Insufficient Evidence, Answer Flag submission and owner review, failed replacement isolation, successful atomic activation, cascading cleanup, and removal of all temporary smoke data. The latest recorded execution is [the 2026-11-06 Week 6 smoke record](docs/smoke/2026-11-06-week6.md).
+The canonical Week 6 specification and tickets live in GitHub: [#9](https://github.com/ahmedtehseen/streamwise-ai/issues/9), with implementation tickets [#10](https://github.com/ahmedtehseen/streamwise-ai/issues/10) through [#15](https://github.com/ahmedtehseen/streamwise-ai/issues/15). Follow [the complete Week 6 real-service smoke procedure](docs/real-service-smoke.md) against the configured Supabase project and Gemini API. It covers shared Visitor/global allowance outcomes, primary generation and compatible fallback, visibly degraded retrieval, Grounded Answers and Insufficient Evidence, Answer Flag submission and owner review, failed replacement isolation, successful atomic activation, cascading cleanup, and removal of all temporary smoke data. The latest recorded execution is [the 2026-11-06 Week 6 smoke record](docs/smoke/2026-11-06-week6.md).
 
 The allowance concurrency check is destructive to `public_allowance_buckets` and therefore requires a separately configured isolated database. Never run it against production:
 
@@ -225,6 +226,6 @@ npm run allowance:verify
 ├── supabase/
 │   ├── migrations/                            # Versioned schema migrations
 │   └── verify_knowledge_schema.sql            # Read-only post-migration schema verification
-├── docs/                                      # ADRs, specs, tickets, and agent guidelines
+├── docs/                                      # ADRs, historical plans, smoke proof, and agent guidelines
 └── GLOSSARY.md                                # Official domain language & terminology
 ```
