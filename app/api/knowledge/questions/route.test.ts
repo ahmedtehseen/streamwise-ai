@@ -113,10 +113,16 @@ describe("Project Knowledge Assistant question API", () => {
         return Response.json({ embedding: { values: Array.from({ length: 768 }, (_, index) => index === 0 ? 1 : 0) } });
       }
       return Response.json({
-        candidates: [{ content: { parts: [{ text: JSON.stringify({
-          outcome: "answered",
-          paragraphs: [{ text: "Atlas deploys on Fridays, with release review at 14:00 UTC.", chunkIds: ["source-1", "source-2"] }]
-        }) }] } }]
+        candidates: [{
+          content: {
+            parts: [{
+              text: JSON.stringify({
+                outcome: "answered",
+                paragraphs: [{ text: "Atlas deploys on Fridays, with release review at 14:00 UTC.", chunkIds: ["source-1", "source-2"] }]
+              })
+            }]
+          }
+        }]
       });
     }));
 
@@ -139,8 +145,13 @@ describe("Project Knowledge Assistant question API", () => {
       }]
     });
     expect(database.rpcCalls).toEqual([{
-      name: "match_ready_document_chunks",
-      parameters: expect.objectContaining({ p_match_count: 5, p_embedding_model: "gemini-embedding-2", p_embedding_dimension: 768 })
+      name: "match_ready_document_chunks_hybrid",
+      parameters: expect.objectContaining({
+        p_match_count: 5,
+        p_embedding_model: "gemini-embedding-2",
+        p_embedding_dimension: 768,
+        p_query_text: "Atlas deploy review releases"
+      })
     }]);
     expect(database.rpcCalls[0].parameters.p_query_embedding).toHaveLength(768);
     expect(requests[0].url).toContain("gemini-embedding-2:embedContent");
@@ -216,6 +227,66 @@ describe("Project Knowledge Assistant question API", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ outcome: "insufficient_evidence", paragraphs: [] });
+  });
+
+  it("returns Insufficient Evidence immediately without generating an answer when all chunks exceed the distance threshold", async () => {
+    database.readyDocumentCount = 1;
+    database.storedChunks = [{
+      document_status: "ready",
+      chunk_id: "chunk-distant",
+      document_name: "unrelated.md",
+      text: "Unrelated topic content.",
+      heading_path: [],
+      start_line: 1,
+      end_line: 1,
+      cosine_distance: 0.85
+    }];
+    const requests = stubGeminiAnswer({ outcome: "answered", paragraphs: [{ text: "invented", chunkIds: ["source-1"] }] });
+
+    const response = await ask("What is the Atlas budget?");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ outcome: "insufficient_evidence", paragraphs: [] });
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toContain(":embedContent");
+  });
+
+  it("includes chunks that match keyword full-text search even when cosine distance is above threshold", async () => {
+    database.readyDocumentCount = 1;
+    database.storedChunks = [{
+      document_status: "ready",
+      chunk_id: "chunk-keyword-hit",
+      document_name: "portfolio.md",
+      text: "Ahmed optimized Next.js pgvector performance by 8x.",
+      heading_path: ["Performance"],
+      start_line: 5,
+      end_line: 5,
+      cosine_distance: 0.78,
+      fts_rank: 0.65
+    }];
+    const requests = stubGeminiAnswer({
+      outcome: "answered",
+      paragraphs: [{ text: "Ahmed boosted pgvector performance by 8x.", chunkIds: ["source-1"] }]
+    });
+
+    const response = await ask("What did Ahmed do for pgvector performance?");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      outcome: "answered",
+      paragraphs: [{
+        text: "Ahmed boosted pgvector performance by 8x.",
+        sourceReferences: [{
+          id: "source-1",
+          documentName: "portfolio.md",
+          headingPath: ["Performance"],
+          startLine: 5,
+          endLine: 5,
+          excerpt: "Ahmed optimized Next.js pgvector performance by 8x."
+        }]
+      }]
+    });
+    expect(requests).toHaveLength(2);
   });
 
   it("treats injected Project Document text and the question as delimited untrusted evidence", async () => {

@@ -45,11 +45,35 @@ export default function KnowledgePanel() {
   const [questionError, setQuestionError] = useState<string | null>(null);
   const [isDocumentDrawerOpen, setIsDocumentDrawerOpen] = useState(false);
   const [selectedUploadName, setSelectedUploadName] = useState<string | null>(null);
+  const [askingStep, setAskingStep] = useState<string | null>(null);
+  const [adminKey, setAdminKey] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const drawerRef = useRef<HTMLElement>(null);
   const drawerCloseRef = useRef<HTMLButtonElement>(null);
   const drawerTriggerRef = useRef<HTMLButtonElement>(null);
   const hasReadyDocument = documents.some((document) => document.status === "ready");
+
+  const samplePrompts = [
+    "What are your core technical skills and architecture experience?",
+    "Tell me about a challenging project and how you solved it.",
+    "What is your experience with performance optimization and databases?"
+  ];
+
+  function formatMediaType(type: string): string {
+    switch (type) {
+      case "application/pdf": return "PDF";
+      case "text/markdown": return "Markdown";
+      case "text/html": return "HTML";
+      case "application/json": return "JSON";
+      case "text/csv": return "CSV";
+      default: return "Plain text";
+    }
+  }
+
+  useEffect(() => {
+    const savedKey = sessionStorage.getItem("portfolio_admin_key");
+    if (savedKey) setAdminKey(savedKey);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -114,7 +138,9 @@ export default function KnowledgePanel() {
     try {
       const formData = new FormData();
       formData.set("document", file);
-      const response = await fetch("/api/knowledge/documents", { method: "POST", body: formData });
+      const headers: Record<string, string> = {};
+      if (adminKey.trim()) headers["x-admin-key"] = adminKey.trim();
+      const response = await fetch("/api/knowledge/documents", { method: "POST", body: formData, headers });
       const payload = await response.json() as { document?: ProjectDocument; error?: string };
       if (!response.ok) {
         if (payload.document) setDocuments((current) => current.map((document) => document.id === pendingId ? payload.document! : document));
@@ -141,6 +167,16 @@ export default function KnowledgePanel() {
     setAnswer(null);
     setSelectedSource(null);
     setIsAsking(true);
+    setAskingStep("Searching Knowledge Base…");
+
+    const timer1 = setTimeout(() => {
+      setAskingStep("Reading relevant passages…");
+    }, 1100);
+
+    const timer2 = setTimeout(() => {
+      setAskingStep("Synthesizing Grounded Answer…");
+    }, 2200);
+
     try {
       const response = await fetch("/api/knowledge/questions", {
         method: "POST",
@@ -155,7 +191,10 @@ export default function KnowledgePanel() {
     } catch (caughtError) {
       setQuestionError(caughtError instanceof Error ? caughtError.message : "A Grounded Answer could not be generated.");
     } finally {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
       setIsAsking(false);
+      setAskingStep(null);
     }
   }
 
@@ -164,7 +203,9 @@ export default function KnowledgePanel() {
     setDocumentError(null);
     setDeletingDocumentIds((current) => [...current, document.id]);
     try {
-      const response = await fetch(`/api/knowledge/documents/${encodeURIComponent(document.id)}`, { method: "DELETE" });
+      const headers: Record<string, string> = {};
+      if (adminKey.trim()) headers["x-admin-key"] = adminKey.trim();
+      const response = await fetch(`/api/knowledge/documents/${encodeURIComponent(document.id)}`, { method: "DELETE", headers });
       if (!response.ok) {
         const payload = await response.json() as { error?: string };
         throw new Error(payload.error || "The Project Document could not be deleted.");
@@ -188,7 +229,9 @@ export default function KnowledgePanel() {
       ? { ...document, status: "indexing", failureDetail: null, retryable: false }
       : document));
     try {
-      const response = await fetch(`/api/knowledge/documents/${encodeURIComponent(documentId)}/retry`, { method: "POST" });
+      const headers: Record<string, string> = {};
+      if (adminKey.trim()) headers["x-admin-key"] = adminKey.trim();
+      const response = await fetch(`/api/knowledge/documents/${encodeURIComponent(documentId)}/retry`, { method: "POST", headers });
       const payload = await response.json() as { document?: ProjectDocument; error?: string };
       if (payload.document) setDocuments((current) => current.map((document) => document.id === documentId ? payload.document! : document));
       if (!response.ok || !payload.document) throw new Error(payload.error || "The Project Document could not be retried.");
@@ -226,6 +269,29 @@ export default function KnowledgePanel() {
         </header>
 
         {questionError && <p className="knowledge-error" role="alert">{questionError}</p>}
+
+        <div className="knowledge-prompts" style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
+          {samplePrompts.map((prompt) => (
+            <button
+              key={prompt}
+              type="button"
+              className="prompt-chip"
+              onClick={() => setQuestion(prompt)}
+              style={{
+                fontSize: "0.8rem",
+                padding: "0.25rem 0.6rem",
+                borderRadius: "1rem",
+                border: "1px solid rgba(255, 255, 255, 0.15)",
+                background: "rgba(255, 255, 255, 0.05)",
+                color: "inherit",
+                cursor: "pointer"
+              }}
+            >
+              {prompt}
+            </button>
+          ))}
+        </div>
+
         <form className="knowledge-question" onSubmit={askQuestion}>
           <label htmlFor="knowledge-question">What would you like to know?</label>
           <textarea id="knowledge-question" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder={isLoading ? "Loading Project Documents…" : hasReadyDocument ? "Ask about decisions, requirements, policies, or project details…" : "Add a Project Document to start asking grounded questions"} disabled={isLoading || !hasReadyDocument || isAsking} rows={4} required />
@@ -234,6 +300,38 @@ export default function KnowledgePanel() {
             <button type="submit" disabled={isLoading || !hasReadyDocument || !question.trim() || isAsking}>{isAsking ? "Searching…" : "Ask question"}</button>
           </div>
         </form>
+        {isAsking && askingStep && (
+          <div
+            className="knowledge-asking-status"
+            role="status"
+            aria-live="polite"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.65rem",
+              marginTop: "1.5rem",
+              padding: "0.75rem 1rem",
+              borderRadius: "0.625rem",
+              background: "#1d2024",
+              border: "1px solid #40464f",
+              color: "#c4c7c5",
+              fontSize: "0.875rem"
+            }}
+          >
+            <span
+              style={{
+                display: "inline-block",
+                width: "0.85rem",
+                height: "0.85rem",
+                borderRadius: "50%",
+                border: "2px solid #5a5f67",
+                borderTopColor: "#a8c7fa",
+                animation: "spin 0.8s linear infinite"
+              }}
+            />
+            <span>{askingStep}</span>
+          </div>
+        )}
         {answer?.outcome === "insufficient_evidence" && <p className="knowledge-empty">The Knowledge Base does not contain enough evidence to answer that question.</p>}
         {answer?.outcome === "answered" && (
           <article className="grounded-answer" aria-live="polite">
@@ -269,9 +367,24 @@ export default function KnowledgePanel() {
               <button ref={drawerCloseRef} className="document-drawer-close" type="button" onClick={closeDocumentDrawer} aria-label="Close project documents">×</button>
             </header>
             <div className="document-drawer-content">
+              <div style={{ marginBottom: "1rem", padding: "0.5rem", borderRadius: "0.375rem", border: "1px solid rgba(255, 255, 255, 0.15)" }}>
+                <label htmlFor="admin-key-input" style={{ fontSize: "0.75rem", display: "block", marginBottom: "0.25rem", opacity: 0.8 }}>Admin / Owner Key (Required if ADMIN_SECRET is set)</label>
+                <input
+                  id="admin-key-input"
+                  type="password"
+                  placeholder="Enter admin secret to upload or delete"
+                  value={adminKey}
+                  onChange={(e) => {
+                    setAdminKey(e.target.value);
+                    sessionStorage.setItem("portfolio_admin_key", e.target.value);
+                  }}
+                  style={{ width: "100%", padding: "0.35rem 0.5rem", fontSize: "0.825rem", background: "transparent", border: "1px solid rgba(255, 255, 255, 0.2)", borderRadius: "0.25rem", color: "inherit" }}
+                />
+              </div>
+
               <form className="knowledge-upload" onSubmit={uploadDocument}>
-                <div className="knowledge-upload-heading"><strong>Add a document</strong><span>Markdown or plain text · max 500 KB</span></div>
-                <input ref={inputRef} className="sr-only" id="project-document" name="document" type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" disabled={isUploading} onChange={(event) => setSelectedUploadName(event.target.files?.[0]?.name ?? null)} required />
+                <div className="knowledge-upload-heading"><strong>Add a document</strong><span>PDF, MD, TXT, HTML, JSON, CSV · max 500 KB</span></div>
+                <input ref={inputRef} className="sr-only" id="project-document" name="document" type="file" accept=".md,.markdown,.txt,.pdf,.html,.htm,.json,.csv,text/markdown,text/plain,application/pdf,text/html,application/json,text/csv" disabled={isUploading} onChange={(event) => setSelectedUploadName(event.target.files?.[0]?.name ?? null)} required />
                 <label className="document-file-picker" htmlFor="project-document">
                   <span>{selectedUploadName ?? "Choose a document"}</span><strong>{selectedUploadName ? "Change" : "Browse"}</strong>
                 </label>
@@ -279,11 +392,11 @@ export default function KnowledgePanel() {
               </form>
               {documentError && <p className="knowledge-error" role="alert">{documentError}</p>}
               <div className="knowledge-list-heading"><h4>Uploaded Project Documents</h4><span>{isLoading ? "…" : documents.length}</span></div>
-              {isLoading ? <p className="knowledge-empty">Loading the Knowledge Base…</p> : documents.length === 0 ? <p className="knowledge-empty">No documents yet. Add Markdown or plain text to get started.</p> : (
+              {isLoading ? <p className="knowledge-empty">Loading the Knowledge Base…</p> : documents.length === 0 ? <p className="knowledge-empty">No documents yet. Add a Project Document to get started.</p> : (
                 <ul className="knowledge-list">
                   {documents.map((document) => (
                     <li key={document.id}>
-                      <div className="document-details"><strong title={document.name}>{document.name}</strong><span>{Math.max(1, Math.ceil(document.byteSize / 1024))} KB · {document.mediaType === "text/markdown" ? "Markdown" : "Plain text"}</span>{document.status === "failed" && document.failureDetail && <span className="document-failure">{document.failureDetail}</span>}</div>
+                      <div className="document-details"><strong title={document.name}>{document.name}</strong><span>{Math.max(1, Math.ceil(document.byteSize / 1024))} KB · {formatMediaType(document.mediaType)}</span>{document.status === "failed" && document.failureDetail && <span className="document-failure">{document.failureDetail}</span>}</div>
                       <div className="document-actions">
                         <span className={`document-status ${document.status}`}><i aria-hidden="true" />{document.status}</span>
                         {document.status !== "indexing" && (

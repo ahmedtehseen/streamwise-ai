@@ -138,6 +138,7 @@ h1 { grid-area: title; min-width: 0; margin: 4px 0 0; overflow: hidden; color: #
 .typing span { display: inline-block; animation: pulse 1s infinite; }
 @keyframes pulse { 50% { opacity: .2; } }
 @keyframes title-marquee { 0%, 12% { transform: translateX(0); } 88%, 100% { transform: translateX(-50%); } }
+@keyframes spin { to { transform: rotate(360deg); } }
 .study-plan { max-width: 660px; padding: 17px; border: 1px solid #445169; border-radius: 12px; background: #202329; }
 .plan-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #a8c7fa; font-size: 11px; font-weight: 750; }
 .plan-heading strong { padding: 4px 7px; border-radius: 999px; background: #303d51; font-size: 11px; }

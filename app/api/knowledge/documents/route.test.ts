@@ -213,11 +213,15 @@ describe("Knowledge Project Document API", () => {
   it.each([
     ["notes.md", "text/plain", "text/markdown"],
     ["notes.markdown", "", "text/markdown"],
-    ["notes.txt", "", "text/plain"]
+    ["notes.txt", "", "text/plain"],
+    ["notes.html", "text/html", "text/html"],
+    ["profile.json", "application/json", "application/json"],
+    ["metrics.csv", "text/csv", "text/csv"]
   ])("accepts browser-compatible MIME reporting for %s", async (name, browserType, storedType) => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ embedding: { values: [1, ...Array.from({ length: 767 }, () => 0)] } })));
     const formData = new FormData();
-    formData.set("document", new File(["Project notes"], name, { type: browserType }));
+    const content = name.endsWith(".json") ? JSON.stringify({ notes: "Project notes" }) : "Project notes";
+    formData.set("document", new File([content], name, { type: browserType }));
 
     const { POST } = await import("./route");
     const response = await POST(new Request("http://localhost/api/knowledge/documents", { method: "POST", body: formData }));
@@ -316,9 +320,9 @@ describe("Knowledge Project Document API", () => {
     },
     {
       caseName: "unsupported",
-      file: () => new File(["PDF-like content"], "brief.pdf", { type: "application/pdf" }),
+      file: () => new File(["DOCX-like content"], "brief.docx", { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }),
       status: 415,
-      error: "Use a Markdown (.md) or plain-text (.txt) Project Document."
+      error: "Word documents (.docx) are not supported. Please upload a PDF, Markdown, or text document."
     },
     {
       caseName: "oversized",
@@ -501,5 +505,37 @@ describe("Knowledge Project Document API", () => {
 
     expect([firstRetry.status, secondRetry.status].sort()).toEqual([200, 409]);
     expect(database.completedChunks).toHaveLength(1);
+  });
+
+  it("rejects document upload when ADMIN_SECRET is set and request is unauthorized", async () => {
+    process.env.ADMIN_SECRET = "super-secret-admin-key";
+    const formData = new FormData();
+    formData.set("document", new File(["Project notes"], "notes.txt", { type: "text/plain" }));
+
+    const { POST } = await import("./route");
+    const response = await POST(new Request("http://localhost/api/knowledge/documents", { method: "POST", body: formData }));
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized. An Admin Key is required to upload Project Documents."
+    });
+    delete process.env.ADMIN_SECRET;
+  });
+
+  it("allows document upload when ADMIN_SECRET is set and valid x-admin-key is provided", async () => {
+    process.env.ADMIN_SECRET = "super-secret-admin-key";
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ embedding: { values: [1, ...Array.from({ length: 767 }, () => 0)] } })));
+    const formData = new FormData();
+    formData.set("document", new File(["Project notes"], "notes.txt", { type: "text/plain" }));
+
+    const { POST } = await import("./route");
+    const response = await POST(new Request("http://localhost/api/knowledge/documents", {
+      method: "POST",
+      headers: { "x-admin-key": "super-secret-admin-key" },
+      body: formData
+    }));
+
+    expect(response.status).toBe(201);
+    delete process.env.ADMIN_SECRET;
   });
 });

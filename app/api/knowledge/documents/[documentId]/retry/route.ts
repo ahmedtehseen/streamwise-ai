@@ -1,13 +1,17 @@
 import { ProjectDocumentRecord, publicProjectDocument, runProjectDocumentIndexing } from "../../../../../../lib/knowledge/indexing";
-import { createKnowledgeClient, knowledgeConfiguration } from "../../../../../../lib/knowledge/server";
+import { createKnowledgeClient, knowledgeConfiguration, verifyAdminAccess } from "../../../../../../lib/knowledge/server";
 
 export const runtime = "nodejs";
 type RetryProjectDocumentRecord = ProjectDocumentRecord & { original_text: string };
 
 export async function POST(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ documentId: string }> }
 ) {
+  if (!verifyAdminAccess(request)) {
+    return Response.json({ error: "Unauthorized. An Admin Key is required to retry Project Document indexing." }, { status: 401 });
+  }
+
   let configuration: ReturnType<typeof knowledgeConfiguration>;
   try {
     configuration = knowledgeConfiguration();

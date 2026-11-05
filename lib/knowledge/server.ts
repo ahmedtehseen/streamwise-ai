@@ -7,6 +7,29 @@ export const KNOWLEDGE_BASE_ID = "00000000-0000-0000-0000-000000000001";
 export const EMBEDDING_MODEL = "gemini-embedding-2";
 export const EMBEDDING_DIMENSION = 768;
 export const ANSWER_MODEL = "gemini-3.5-flash-lite";
+export const KNOWLEDGE_DISTANCE_THRESHOLD = 0.7;
+
+const STOP_WORDS = new Set([
+  "a", "about", "an", "and", "are", "as", "at", "be", "by", "can", "could", "did", "do",
+  "does", "explain", "for", "from", "had", "has", "have", "how", "i", "if", "in", "is",
+  "it", "me", "my", "of", "on", "or", "our", "please", "should", "tell", "that", "the",
+  "their", "then", "there", "these", "they", "this", "to", "us", "was", "we", "were",
+  "what", "when", "where", "which", "who", "why", "will", "with", "would", "you", "your"
+]);
+
+export function extractSearchKeywords(question: string): string {
+  const words = question
+    .replace(/[?!,;:]/g, " ")
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length > 1 && !STOP_WORDS.has(w.toLowerCase()));
+
+  if (words.length === 0) {
+    return question.replace(/[?!,;:]/g, " ").trim();
+  }
+
+  return words.join(" ");
+}
 
 export class KnowledgeIndexingError extends Error {
   constructor(message: string, readonly retryable: boolean) {
@@ -66,7 +89,11 @@ async function requestEmbedding(value: string, apiKey: string, policy: Embedding
       output_dimensionality: EMBEDDING_DIMENSION
     })
   });
-  if (!response.ok) throw policy.responseFailure(response);
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => "");
+    console.error("Gemini embedding failed:", response.status, errorBody);
+    throw policy.responseFailure(response);
+  }
 
   let embedding: number[] | undefined;
   try {
@@ -81,6 +108,21 @@ async function requestEmbedding(value: string, apiKey: string, policy: Embedding
   const magnitude = Math.hypot(...embedding);
   if (!Number.isFinite(magnitude) || magnitude === 0) throw policy.invalidEmbedding();
   return embedding.map((item) => item / magnitude);
+}
+
+export function verifyAdminAccess(request: Request): boolean {
+  const secret = process.env.ADMIN_SECRET;
+  if (!secret) return true;
+  const headerKey = request.headers.get("x-admin-key");
+  if (headerKey && headerKey === secret) return true;
+  try {
+    const url = new URL(request.url);
+    const queryKey = url.searchParams.get("adminKey");
+    if (queryKey && queryKey === secret) return true;
+  } catch {
+    // If request.url is relative or invalid
+  }
+  return false;
 }
 
 export function knowledgeDatabaseConfiguration() {
@@ -188,11 +230,18 @@ export async function generateGroundedAnswer(
       generationConfig: {
         temperature: 0,
         responseMimeType: "application/json",
-        responseSchema: groundedAnswerJsonSchema
+        responseSchema: groundedAnswerJsonSchema,
+        thinkingConfig: {
+          thinkingBudget: 1
+        }
       }
     })
   });
-  if (!response.ok) throw geminiFailure(response, "answer");
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => "");
+    console.error("Gemini answer generation failed:", response.status, errorBody);
+    throw geminiFailure(response, "answer");
+  }
   const payload = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
   const text = payload.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new KnowledgeError("Gemini returned an invalid Grounded Answer.", "invalid_model_output", false, 502);

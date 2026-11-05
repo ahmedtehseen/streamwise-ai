@@ -4,21 +4,29 @@ import {
   createKnowledgeClient,
   KNOWLEDGE_BASE_ID,
   knowledgeDatabaseConfiguration,
-  knowledgeConfiguration
+  knowledgeConfiguration,
+  verifyAdminAccess
 } from "../../../../lib/knowledge/server";
+import { extractTextFromBuffer, SupportedMediaType } from "../../../../lib/knowledge/extractors";
+import { invalidateReadyDocumentCountCache } from "../questions/route";
 
 export const runtime = "nodejs";
 const MAX_DOCUMENT_BYTES = 500 * 1024;
 
-function mediaTypeFor(file: File) {
+function mediaTypeFor(file: File): SupportedMediaType | null {
   const lowerName = file.name.toLowerCase();
   const browserType = file.type.toLowerCase();
   const browserDidNotReportType = browserType === "" || browserType === "application/octet-stream";
+
   if (
     (lowerName.endsWith(".md") || lowerName.endsWith(".markdown"))
     && (browserDidNotReportType || browserType === "text/markdown" || browserType === "text/plain")
   ) return "text/markdown";
   if (lowerName.endsWith(".txt") && (browserDidNotReportType || browserType === "text/plain")) return "text/plain";
+  if (lowerName.endsWith(".pdf") && (browserDidNotReportType || browserType === "application/pdf")) return "application/pdf";
+  if ((lowerName.endsWith(".html") || lowerName.endsWith(".htm")) && (browserDidNotReportType || browserType === "text/html")) return "text/html";
+  if (lowerName.endsWith(".json") && (browserDidNotReportType || browserType === "application/json" || browserType === "text/plain")) return "application/json";
+  if (lowerName.endsWith(".csv") && (browserDidNotReportType || browserType === "text/csv" || browserType === "application/vnd.ms-excel" || browserType === "text/plain")) return "text/csv";
   return null;
 }
 
@@ -47,6 +55,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  if (!verifyAdminAccess(request)) {
+    return Response.json({ error: "Unauthorized. An Admin Key is required to upload Project Documents." }, { status: 401 });
+  }
+
   let configuration: ReturnType<typeof knowledgeConfiguration>;
   try {
     configuration = knowledgeConfiguration();
@@ -56,23 +68,33 @@ export async function POST(request: Request) {
 
   const formData = await request.formData().catch(() => null);
   const documentFile = formData?.get("document");
-  if (!(documentFile instanceof File)) return Response.json({ error: "Choose a Markdown or plain-text Project Document." }, { status: 400 });
+  if (!(documentFile instanceof File)) return Response.json({ error: "Choose a Project Document to upload." }, { status: 400 });
+
+  const lowerName = documentFile.name.toLowerCase();
+  if (lowerName.endsWith(".docx") || lowerName.endsWith(".doc")) {
+    return Response.json({ error: "Word documents (.docx) are not supported. Please upload a PDF, Markdown, or text document." }, { status: 415 });
+  }
+
   const mediaType = mediaTypeFor(documentFile);
-  if (!mediaType) return Response.json({ error: "Use a Markdown (.md) or plain-text (.txt) Project Document." }, { status: 415 });
+  if (!mediaType) return Response.json({ error: "Use a supported Project Document (.md, .txt, .pdf, .html, .json, .csv)." }, { status: 415 });
   if (documentFile.size === 0) return Response.json({ error: "The Project Document is empty." }, { status: 400 });
   if (documentFile.size > MAX_DOCUMENT_BYTES) return Response.json({ error: "Keep the Project Document at or below 500 KB." }, { status: 413 });
 
   const bytes = new Uint8Array(await documentFile.arrayBuffer());
-  if (looksBinary(bytes)) return Response.json({ error: "The Project Document appears to contain binary content." }, { status: 415 });
+  const fingerprint = createHash("sha256").update(bytes).digest("hex");
+  if (mediaType !== "application/pdf" && looksBinary(bytes)) {
+    return Response.json({ error: "The Project Document appears to contain binary content." }, { status: 415 });
+  }
+
   let text: string;
   try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes).replace(/^\uFEFF/, "");
-  } catch {
-    return Response.json({ error: "The Project Document must contain valid UTF-8 text." }, { status: 415 });
+    text = await extractTextFromBuffer(bytes, mediaType);
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "The Project Document could not be parsed." }, { status: 415 });
   }
+
   if (!text.trim()) return Response.json({ error: "The Project Document is empty." }, { status: 400 });
   const client = createKnowledgeClient(configuration.supabaseUrl, configuration.serviceRoleKey);
-  const fingerprint = createHash("sha256").update(bytes).digest("hex");
   const { data: indexingDocument, error: insertError } = await client.rpc("begin_project_document_indexing", {
     p_document: {
       knowledge_base_id: KNOWLEDGE_BASE_ID,
@@ -84,19 +106,29 @@ export async function POST(request: Request) {
       status: "indexing"
     }
   });
+  if (insertError) {
+    console.error("Document indexing insert error:", insertError);
+  }
   if (insertError?.message.includes("KNOWLEDGE_BASE_CAPACITY")) {
     return Response.json({ error: "The Knowledge Base can contain at most 20 Project Documents." }, { status: 409 });
   }
   if (insertError?.code === "23505") {
     return Response.json({ error: "An identical Project Document is already in the Knowledge Base." }, { status: 409 });
   }
-  if (insertError || !indexingDocument) return Response.json({ error: "The Project Document could not be saved for indexing." }, { status: 502 });
+  if (insertError || !indexingDocument) {
+    return Response.json({ 
+      error: insertError?.message?.includes("project_documents_media_type_check")
+        ? `Database constraint error: '${mediaType}' is not yet allowed in Supabase. Please apply migration 202611040001_multi_format_and_hybrid_search.sql.`
+        : "The Project Document could not be saved for indexing."
+    }, { status: 502 });
+  }
 
   try {
     const result = await runProjectDocumentIndexing(client, indexingDocument.id, text, mediaType === "text/markdown", configuration.geminiApiKey);
     if (result.outcome === "failed") {
       return Response.json({ error: result.detail, document: publicProjectDocument(result.document as ProjectDocumentRecord) }, { status: 502 });
     }
+    invalidateReadyDocumentCountCache();
     return Response.json({ document: publicProjectDocument(result.document as ProjectDocumentRecord) }, { status: 201 });
   } catch {
     return Response.json({ error: "Indexing failed and the Project Document cleanup could not be confirmed." }, { status: 502 });
