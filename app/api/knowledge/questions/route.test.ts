@@ -35,7 +35,7 @@ vi.mock("../../../../lib/public-allowance", () => ({
   admitPublicAction: vi.fn(async () => null)
 }));
 
-describe("Project Knowledge Assistant question API", () => {
+describe("Portfolio Assistant question API", () => {
   beforeEach(() => {
     vi.resetModules();
     database.readyDocumentCount = 0;

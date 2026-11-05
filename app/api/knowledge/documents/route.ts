@@ -67,7 +67,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   if (!verifyAdminAccess(request)) {
-    return Response.json({ error: "Unauthorized. An Admin Key is required to upload Project Documents." }, { status: 401 });
+    return Response.json({ error: "Unauthorized. The Portfolio Owner secret is required to upload Project Documents." }, { status: 401 });
   }
 
   let configuration: ReturnType<typeof knowledgeConfiguration>;

@@ -19,7 +19,7 @@ select
       and class.relname in ('knowledge_bases', 'project_documents', 'document_chunks')
   ) as knowledge_tables_have_rls,
   (
-    select count(*) = 8
+    select count(*) = 10
     from pg_proc as procedure
     join pg_namespace as namespace on namespace.oid = procedure.pronamespace
     where namespace.nspname = 'public'
@@ -31,7 +31,9 @@ select
         'begin_project_document_replacement',
         'retry_project_document_replacement',
         'discard_project_document_replacement',
-        'match_ready_document_chunks'
+        'match_ready_document_chunks',
+        'match_ready_document_chunks_hybrid',
+        'match_ready_document_chunks_full_text'
       )
   ) as knowledge_functions_ready,
   exists (
@@ -50,8 +52,8 @@ select
     select 1
     from public.knowledge_bases
     where id = '00000000-0000-0000-0000-000000000001'
-      and name = 'Shared private Knowledge Base'
-  ) as shared_private_knowledge_base_ready,
+      and name = 'Portfolio Owner Knowledge Base'
+  ) as portfolio_owner_knowledge_base_ready,
   exists (
     select 1
     from pg_class as class

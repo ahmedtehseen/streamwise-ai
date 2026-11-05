@@ -29,7 +29,7 @@ function looksBinary(bytes: Uint8Array) {
 
 export async function POST(request: Request, context: { params: Promise<{ documentId: string }> }) {
   if (!verifyAdminAccess(request)) {
-    return Response.json({ error: "Unauthorized. An Admin Key is required to replace Project Documents." }, { status: 401 });
+    return Response.json({ error: "Unauthorized. The Portfolio Owner secret is required to replace Project Documents." }, { status: 401 });
   }
 
   let configuration: ReturnType<typeof knowledgeConfiguration>;
@@ -96,7 +96,7 @@ export async function POST(request: Request, context: { params: Promise<{ docume
 
 export async function DELETE(request: Request, context: { params: Promise<{ documentId: string }> }) {
   if (!verifyAdminAccess(request)) {
-    return Response.json({ error: "Unauthorized. An Admin Key is required to discard Document Replacements." }, { status: 401 });
+    return Response.json({ error: "Unauthorized. The Portfolio Owner secret is required to discard Document Replacements." }, { status: 401 });
   }
   try {
     const { documentId } = await context.params;

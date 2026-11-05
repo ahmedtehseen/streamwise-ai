@@ -44,6 +44,7 @@ const requiredFragments = [
   "create or replace function public.fail_project_document_indexing",
   "create or replace function public.retry_project_document_indexing",
   "create or replace function public.match_ready_document_chunks",
+  "create or replace function public.match_ready_document_chunks_hybrid",
   "create or replace function public.match_ready_document_chunks_full_text",
   "revoke all on function public.begin_project_document_indexing",
   "revoke all on function public.complete_project_document_indexing",
@@ -85,7 +86,8 @@ const requiredFragments = [
   "create or replace function public.begin_project_document_replacement",
   "create or replace function public.retry_project_document_replacement",
   "create or replace function public.discard_project_document_replacement",
-  "delete from public.project_documents where id = superseded_document_id"
+  "delete from public.project_documents where id = superseded_document_id",
+  "name = 'portfolio owner knowledge base'"
 ];
 
 for (const fragment of requiredFragments) {

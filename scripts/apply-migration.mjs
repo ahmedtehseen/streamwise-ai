@@ -1,53 +1,69 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import pg from "pg";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const envFile = await readFile(path.join(root, ".env.local"), "utf8");
 
-let dbUrl = "";
-for (const line of envFile.split("\n")) {
-  const trimmed = line.trim();
-  if (trimmed.startsWith("SUPABASE_DB_URL=")) {
-    dbUrl = trimmed.slice("SUPABASE_DB_URL=".length).trim();
-    if ((dbUrl.startsWith('"') && dbUrl.endsWith('"')) || (dbUrl.startsWith("'") && dbUrl.endsWith("'"))) {
-      dbUrl = dbUrl.slice(1, -1);
+async function localDatabaseUrl() {
+  if (process.env.SUPABASE_DB_URL) return process.env.SUPABASE_DB_URL;
+  const envFile = await readFile(path.join(root, ".env.local"), "utf8").catch(() => "");
+  for (const line of envFile.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("SUPABASE_DB_URL=")) continue;
+    const value = trimmed.slice("SUPABASE_DB_URL=".length).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      return value.slice(1, -1);
     }
-    break;
+    return value;
   }
+  return "";
 }
 
-if (!dbUrl) {
-  console.error("Error: SUPABASE_DB_URL not found in .env.local");
-  process.exit(1);
-}
+const databaseUrl = await localDatabaseUrl();
+if (!databaseUrl) throw new Error("Set SUPABASE_DB_URL or add it to .env.local.");
 
-const migrationPath = path.join(root, "supabase", "migrations", "202611040001_multi_format_and_hybrid_search.sql");
-const sql = await readFile(migrationPath, "utf8");
+const migrationsDirectory = path.join(root, "supabase", "migrations");
+const migrationNames = (await readdir(migrationsDirectory))
+  .filter((name) => /^\d{12,14}_[a-z0-9_]+\.sql$/.test(name))
+  .sort();
+if (migrationNames.length === 0) throw new Error("No versioned Supabase migrations were found.");
 
-console.log("Connecting to Supabase PostgreSQL database...");
-const client = new pg.Client({
-  connectionString: dbUrl,
-  ssl: { rejectUnauthorized: false }
-});
+const migrations = await Promise.all(migrationNames.map(async (name) => ({
+  name,
+  sql: await readFile(path.join(migrationsDirectory, name), "utf8")
+})));
+const client = new pg.Client({ connectionString: databaseUrl, ssl: { rejectUnauthorized: false } });
 
 try {
   await client.connect();
-  console.log("Connected successfully. Applying migration 202611040001_multi_format_and_hybrid_search.sql...");
+  await client.query("begin");
 
-  await client.query("BEGIN;");
-  await client.query(sql);
-  await client.query("COMMIT;");
+  const { rows: existingRelationRows } = await client.query(`
+    select array_remove(array[
+      case when to_regclass('public.knowledge_bases') is not null then 'knowledge_bases' end,
+      case when to_regclass('public.project_documents') is not null then 'project_documents' end,
+      case when to_regclass('public.document_chunks') is not null then 'document_chunks' end,
+      case when to_regclass('public.public_allowance_buckets') is not null then 'public_allowance_buckets' end,
+      case when to_regclass('public.answer_flags') is not null then 'answer_flags' end
+    ], null) as relations
+  `);
+  const existingRelations = existingRelationRows[0]?.relations ?? [];
+  if (existingRelations.length > 0) {
+    throw new Error(
+      `Refusing to replay bootstrap migrations because application tables already exist: ${existingRelations.join(", ")}. Apply only the missing migration files with the Supabase SQL Editor.`
+    );
+  }
 
-  console.log("Migration applied successfully!");
-} catch (err) {
-  console.error("Migration failed:", err);
-  try {
-    await client.query("ROLLBACK;");
-  } catch {}
-  process.exit(1);
+  for (const migration of migrations) {
+    console.log(`Applying ${migration.name}...`);
+    await client.query(migration.sql);
+  }
+  await client.query("commit");
+  console.log(`Applied ${migrations.length} migrations in ascending order.`);
+} catch (error) {
+  await client.query("rollback").catch(() => undefined);
+  throw error;
 } finally {
   await client.end();
 }
-

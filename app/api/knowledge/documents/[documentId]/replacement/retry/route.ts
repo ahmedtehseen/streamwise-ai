@@ -7,7 +7,7 @@ type RetryReplacementRecord = ProjectDocumentRecord & { original_text: string };
 
 export async function POST(request: Request, context: { params: Promise<{ documentId: string }> }) {
   if (!verifyAdminAccess(request)) {
-    return Response.json({ error: "Unauthorized. An Admin Key is required to retry Document Replacements." }, { status: 401 });
+    return Response.json({ error: "Unauthorized. The Portfolio Owner secret is required to retry Document Replacements." }, { status: 401 });
   }
   let configuration: ReturnType<typeof knowledgeConfiguration>;
   try {
