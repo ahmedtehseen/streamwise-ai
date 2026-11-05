@@ -30,6 +30,18 @@ function formatDate(timestamp: number) {
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(timestamp);
 }
 
+async function responseError(response: Response, fallback: string) {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+    if (typeof payload?.error === "string") return payload.error;
+  } else {
+    const message = await response.text().catch(() => "");
+    if (message) return message;
+  }
+  return fallback;
+}
+
 function useObjectUrl(file: File | null) {
   const [url, setUrl] = useState<string | null>(null);
 
@@ -300,7 +312,7 @@ export default function Home() {
 
     try {
       const response = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: messagesForRequest.map(({ role, content }) => ({ role, content })) }) });
-      if (!response.ok || !response.body) throw new Error((await response.text()) || "The AI request could not be started.");
+      if (!response.ok || !response.body) throw new Error(await responseError(response, "The AI request could not be started."));
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       while (true) {

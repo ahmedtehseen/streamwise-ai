@@ -1,13 +1,10 @@
+import { admitPublicAction } from "../../../lib/public-allowance";
+
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  if (!process.env.GEMINI_API_KEY) {
-    return new Response("Missing GEMINI_API_KEY. Add it to .env.local and restart the dev server.", {
-      status: 500
-    });
-  }
-
-  const { messages } = await request.json();
+  const body = await request.json().catch(() => null) as { messages?: unknown } | null;
+  const messages = body?.messages;
 
   if (!Array.isArray(messages) || messages.length === 0) {
     return new Response("Please provide at least one message.", { status: 400 });
@@ -29,6 +26,15 @@ export async function POST(request: Request) {
   if (contents.length === 0) {
     return new Response("Please provide a valid message.", { status: 400 });
   }
+
+  if (!process.env.GEMINI_API_KEY) {
+    return new Response("Missing GEMINI_API_KEY. Add it to .env.local and restart the dev server.", {
+      status: 500
+    });
+  }
+
+  const allowanceResponse = await admitPublicAction(request);
+  if (allowanceResponse) return allowanceResponse;
 
   const geminiResponse = await fetch(
     "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:streamGenerateContent?alt=sse",

@@ -10,6 +10,7 @@ import {
   knowledgeConfiguration
 } from "../../../../lib/knowledge/server";
 import { z } from "zod";
+import { admitPublicAction } from "../../../../lib/public-allowance";
 
 export const runtime = "nodejs";
 
@@ -75,6 +76,9 @@ export async function POST(request: Request) {
   if (!count) {
     return Response.json({ error: "Index at least one Project Document before asking a question." }, { status: 409 });
   }
+
+  const allowanceResponse = await admitPublicAction(request);
+  if (allowanceResponse) return allowanceResponse;
 
   try {
     const question = payload.question.trim();

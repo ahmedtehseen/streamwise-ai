@@ -1,4 +1,5 @@
 import { taskSpecJsonSchema, taskSpecSchema, type TaskSpec } from "../../../lib/task-spec";
+import { admitPublicAction } from "../../../lib/public-allowance";
 
 export const runtime = "nodejs";
 
@@ -14,6 +15,9 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const approvedSpec = taskSpecSchema.safeParse(body?.taskSpec);
   if (!approvedSpec.success) return Response.json({ error: "Review the task spec before creating a draft." }, { status: 400 });
+
+  const allowanceResponse = await admitPublicAction(request);
+  if (allowanceResponse) return allowanceResponse;
 
   const geminiResponse = await fetch(
     "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",

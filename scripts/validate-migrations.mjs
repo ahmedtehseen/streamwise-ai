@@ -53,7 +53,18 @@ const requiredFragments = [
   "grant execute on function public.complete_project_document_indexing",
   "grant execute on function public.fail_project_document_indexing",
   "grant execute on function public.retry_project_document_indexing",
-  "grant execute on function public.match_ready_document_chunks"
+  "grant execute on function public.match_ready_document_chunks",
+  "create table public.public_allowance_buckets",
+  "alter table public.public_allowance_buckets enable row level security",
+  "create or replace function public.admit_public_action",
+  "pg_advisory_xact_lock",
+  "'america/los_angeles'",
+  "v_visitor_minute >= 3",
+  "v_global_minute >= 15",
+  "v_visitor_day >= 10",
+  "v_global_day >= 50",
+  "revoke all on function public.admit_public_action",
+  "grant execute on function public.admit_public_action"
 ];
 
 for (const fragment of requiredFragments) {

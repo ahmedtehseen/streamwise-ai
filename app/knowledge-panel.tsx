@@ -368,11 +368,11 @@ export default function KnowledgePanel() {
             </header>
             <div className="document-drawer-content">
               <div style={{ marginBottom: "1rem", padding: "0.5rem", borderRadius: "0.375rem", border: "1px solid rgba(255, 255, 255, 0.15)" }}>
-                <label htmlFor="admin-key-input" style={{ fontSize: "0.75rem", display: "block", marginBottom: "0.25rem", opacity: 0.8 }}>Admin / Owner Key (Required if ADMIN_SECRET is set)</label>
+                <label htmlFor="admin-key-input" style={{ fontSize: "0.75rem", display: "block", marginBottom: "0.25rem", opacity: 0.8 }}>Portfolio Owner secret</label>
                 <input
                   id="admin-key-input"
                   type="password"
-                  placeholder="Enter admin secret to upload or delete"
+                  placeholder="Enter owner secret to upload or delete"
                   value={adminKey}
                   onChange={(e) => {
                     setAdminKey(e.target.value);

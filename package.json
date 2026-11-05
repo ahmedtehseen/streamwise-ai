@@ -11,7 +11,8 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
-    "migrations:validate": "node scripts/validate-migrations.mjs"
+    "migrations:validate": "node scripts/validate-migrations.mjs",
+    "allowance:verify": "node scripts/verify-public-allowance.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
