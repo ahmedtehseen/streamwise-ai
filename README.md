@@ -8,7 +8,7 @@ Built with Next.js (App Router, Turbopack), the Google Gemini API, Supabase Post
 
 ## Capabilities & Modes
 
-The application features three integrated modes:
+The application features three integrated modes. Streamwise is a single-owner public portfolio product: Visitors use the public capabilities anonymously, while one Portfolio Owner manages the Knowledge Base with a revocable secret.
 
 1. **Chat (Streaming Chat)**
    - Streams Gemini model responses chunk-by-chunk using web `ReadableStream` through a private server endpoint (`POST /api/chat`).
@@ -21,12 +21,18 @@ The application features three integrated modes:
    - **Human-in-the-Loop Tool Calling**: An explicit **Create draft task** action prompts a Gemini tool-call request (`create_task_draft`), strictly validating arguments against the approved spec before saving a local draft receipt (`POST /api/task-draft`).
    - **Draft Task Management**: Review, copy as Markdown, open, or delete drafts directly from the sidebar.
 
-3. **Knowledge (Project Knowledge Assistant & Advanced RAG)**
+3. **Portfolio Assistant (Advanced RAG)**
    - **Multi-Format Ingestion**: Ingests Project Documents in Markdown (`.md`, `.markdown`), plain text (`.txt`), PDF (`.pdf`), HTML (`.html`, `.htm`), JSON (`.json`), and CSV (`.csv`) up to 500 KB (512,000 bytes) with automatic text extraction, heading-aware chunking, and deduplication.
    - **Advanced RAG (Hybrid Search with RRF)**: Combines semantic vector similarity (`gemini-embedding-2`, 768 dimensions) and PostgreSQL full-text search (`tsvector` with GIN indexing) via Reciprocal Rank Fusion (RRF) in Supabase.
    - **Dual-Guardrail Pre-Check**: Short-circuits queries without relevant semantic similarity (cosine distance $\le 0.70$) or keyword matches directly to **Insufficient Evidence** in ~200ms, preserving Gemini API quota and minimizing latency.
-   - **Grounded Answers & Source References**: Returns factual answers strictly grounded in retrieved evidence. Users can inspect interactive **Source References** showing the document name, heading path, line range, and stored excerpt.
-   - **Admin Access Control**: Secures document mutation endpoints (upload, retry, delete) via `ADMIN_SECRET` (`x-admin-key`), while providing visitors with an accessible Q&A interface with sample inquiry chips.
+   - **Grounded Answers & Source References**: Returns factual answers strictly grounded in retrieved evidence. Visitors can inspect interactive **Source References** showing the Project Document name, heading path, line range, and stored excerpt.
+   - **Portfolio Owner Access Control**: Secures Project Document mutation endpoints (upload, retry, delete) via `ADMIN_SECRET` (`x-admin-key`), while providing Visitors with an accessible Portfolio Assistant.
+   - **Reviewable Answer Flags**: Gives every Grounded Answer and Insufficient Evidence response a signed identity so Visitors can submit one anonymous, optional-note flag for private owner review without changing evidence or behavior automatically.
+   - **Safe Document Replacement**: Stages one candidate revision while the current ready Project Document remains searchable, then atomically activates the candidate and removes superseded evidence only after successful processing.
+
+All four public AI actions share one durable allowance: 3 actions per Visitor per minute, 15 globally per minute, 10 per Visitor per Pacific day, and 50 globally per Pacific day. Limit responses identify the reset time in Pacific time. A Chat message, Spec generation, task-draft creation, or Portfolio Assistant question consumes one action; navigation, Answer Flags, and owner-only indexing do not. Malformed requests are rejected before admission, and an internal model fallback does not consume another action.
+
+Generation uses `gemini-3.5-flash-lite` first. Confirmed daily-quota exhaustion permits one compatible `gemini-3.1-flash-lite` attempt within the admitted action; short-window throttling receives one bounded retry. A partial Chat stream is never restarted, and the same output validation applies to either model. If both models exhaust daily quota, Streamwise returns a stable unavailable response without provider details.
 
 ---
 
@@ -61,11 +67,15 @@ Configure the following server-side environment variables in `.env.local`:
 | `GEMINI_API_KEY` | All modes | Gemini API key for chat streaming, structured specs, multimodal vision, embeddings, and grounded answers. |
 | `SUPABASE_URL` | Knowledge | Project URL from Supabase **Project Settings → API**. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Knowledge | Privileged service-role secret from Supabase **Project Settings → API** (server-only). |
-| `ADMIN_SECRET` | Knowledge | Shared owner key required to upload, retry, or delete Project Documents. Leave unset only for open local testing. |
+| `ADMIN_SECRET` | Owner operations | High-entropy Portfolio Owner secret required to upload, retry, replace, or delete Project Documents and to review Answer Flags. Production fails closed when it is absent or invalid; leaving it unset is a local-development convenience only. |
+| `ANSWER_FLAG_SECRET` | Optional | Dedicated server-only secret for signing response identities. When omitted, the service-role key is used as the signing key source. |
+| `VISITOR_ID_SECRET` | Public AI routes | Server-only high-entropy secret of at least 32 characters, used to derive rotating one-way Visitor identifiers from Vercel's trusted client-address header. |
 | `SUPABASE_DB_URL` | Optional | Direct Postgres connection URI (optional; used by `scripts/apply-migration.mjs`). |
 
 > [!IMPORTANT]
-> Never commit `.env.local` or expose `SUPABASE_SERVICE_ROLE_KEY` or `ADMIN_SECRET` in client components or through `NEXT_PUBLIC_` variables. Row-level security is enforced on the database, and only server-side routes interact with Supabase.
+> Never commit `.env.local` or expose `GEMINI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_SECRET`, `ANSWER_FLAG_SECRET`, or `VISITOR_ID_SECRET` in client components, public assets, logs, API responses, or `NEXT_PUBLIC_` variables. Only server-side routes use provider credentials. The Portfolio Owner enters `ADMIN_SECRET` at runtime; the application does not embed it in browser assets.
+
+Streamwise does not implement Visitor accounts, multi-user workspaces, project-scoped permissions, or per-document authorization. The configured free Gemini tier may use submitted data to improve Google products, so this deployment does not claim suitability for private client information.
 
 ### 3. Database Migrations (for Knowledge mode)
 
@@ -76,8 +86,14 @@ Apply the versioned migrations located in `supabase/migrations/` in ascending or
 3. `202611030003_match_ready_document_chunks.sql`
 4. `202611030004_recover_document_indexing.sql`
 5. `202611040001_multi_format_and_hybrid_search.sql`
+6. `202611060001_enforce_public_allowance.sql`
+7. `202611060002_degraded_full_text_retrieval.sql`
+8. `202611060003_replace_project_documents.sql`
+9. `202611060004_capture_answer_flags.sql`
+10. `202611060005_align_portfolio_assistant_language.sql`
+11. `202611060006_preserve_answer_response_identity.sql`
 
-You can apply them using the Supabase SQL Editor or via the script:
+Apply incremental migrations to an existing project with the Supabase SQL Editor. For a new empty project, the helper applies the complete ordered set in one transaction and refuses to run when Streamwise application tables already exist:
 ```sh
 node scripts/apply-migration.mjs
 ```
@@ -114,9 +130,12 @@ npm run build               # Verify Next.js production build
 The automated test suite verifies:
 - Multi-format file validation, text extraction, and rejection of unsupported formats (e.g., `.docx`).
 - Chunk indexing, content fingerprinting, deduplication, and capacity enforcement (20 documents).
-- Ready-only retrieval, cosine distance filtering, and keyword search via RRF.
+- Ready-only hybrid retrieval plus explicit full-text-only degradation when Embedding 2 is temporarily unavailable.
 - Grounded Answer synthesis, Insufficient Evidence boundaries, and citation validation.
-- Admin authentication enforcement on document upload, retry, and deletion endpoints.
+- Portfolio Owner authorization enforcement on Project Document upload, retry, and deletion endpoints.
+- Document Replacement success, failure isolation, retry, discard, concurrency, full-capacity, duplicate, authorization, activation, and cleanup behavior.
+- Answer Flag identity verification, Grounded Answer and Insufficient Evidence capture, degraded responses, duplicate prevention, note limits, owner authorization, and review transitions.
+- Shared public allowance admission, missing Visitor identity, durable-storage failure, and minute/day reset responses at all four API seams.
 - Error handling for transient database and Gemini provider failures.
 
 ---
@@ -142,61 +161,25 @@ The automated test suite verifies:
   - Full-text search using `tsvector` generated column (`chunk_to_tsvector`) and GIN index.
   - Reciprocal Rank Fusion: $RRF = \frac{1}{60 + r_{\text{vector}}} + \frac{1}{60 + r_{\text{fts}}}$.
   - Returns top 5 fused chunks.
+- **Degraded Retrieval**:
+  - Eligible temporary Embedding 2 failures use only PostgreSQL full-text search over ready Project Documents.
+  - The API and Knowledge interface disclose reduced-recall keyword search.
+  - No keyword match returns Insufficient Evidence without invoking answer generation.
+  - Authentication failures and invalid or incompatible vectors never trigger degradation.
 
 ---
 
 ## Real-Service Smoke Test
 
-Perform this procedure against a configured private Supabase project and Gemini API to verify the integrated end-to-end workflow:
+The canonical Week 6 specification and tickets live in GitHub: [#9](https://github.com/ahmedtehseen/streamwise-ai/issues/9), with implementation tickets [#10](https://github.com/ahmedtehseen/streamwise-ai/issues/10) through [#15](https://github.com/ahmedtehseen/streamwise-ai/issues/15). Follow [the complete Week 6 real-service smoke procedure](docs/real-service-smoke.md) against the configured Supabase project and Gemini API. It covers shared Visitor/global allowance outcomes, primary generation and compatible fallback, visibly degraded retrieval, Grounded Answers and Insufficient Evidence, Answer Flag submission and owner review, failed replacement isolation, successful atomic activation, cascading cleanup, and removal of all temporary smoke data. The latest recorded execution is [the 2026-11-06 Week 6 smoke record](docs/smoke/2026-11-06-week6.md).
 
-1. **Start Empty**: Open **Knowledge**. Ensure the Knowledge Base is empty or delete existing test documents. Confirm "Loading the Knowledge Base…" resolves to the empty state.
-2. **Upload Markdown Document**: Save and upload `atlas.md` with the content below. Confirm status transitions from **indexing** to **ready**.
+The allowance concurrency check is destructive to `public_allowance_buckets` and therefore requires a separately configured isolated database. Never run it against production:
 
-   ```markdown
-   # Atlas
-
-   ## Release schedule
-
-   Atlas production deployments happen every Friday.
-   Release review begins at 14:00 UTC.
-   ```
-
-3. **Upload Text Document**: Save and upload `operations.txt` with the content below. Confirm status transitions from **indexing** to **ready**.
-
-   ```text
-   The Atlas incident commander is the on-call platform engineer.
-
-   Customer status updates are posted every thirty minutes during an incident.
-   ```
-
-4. **Verify Grounded Answer**: Ask: `When does Atlas deploy and when does release review begin?`
-   - Observe **Searching…**, followed by a Grounded Answer.
-   - Confirm each factual paragraph has a **Source Reference** pointing to `atlas.md`.
-   - Select the reference to inspect the heading path, line range, and excerpt.
-5. **Verify Insufficient Evidence Boundary**: Ask: `What is Atlas's annual infrastructure budget?`
-   - Confirm the result is **Insufficient Evidence** with no hallucinated answers or references.
-6. **Verify Duplicate Rejection**: Upload the unchanged `atlas.md` again (renaming the file is allowed; changing byte content is not). Confirm duplicate content is rejected.
-7. **Test Transient Failure Handling**: In the Supabase SQL editor, run:
-
-   ```sql
-   update public.project_documents
-   set status = 'failed',
-       failure_detail = 'Manual transient failure for smoke test.',
-       failure_retryable = true,
-       updated_at = now()
-   where name = 'operations.txt' and status = 'ready';
-   ```
-
-   Reload Knowledge. Confirm `operations.txt` displays **failed**, the failure detail is visible, and **Retry indexing** is offered.
-8. **Test Retry**: Choose **Retry indexing**. Confirm the status transitions through **Retrying…** / **indexing** to **ready**.
-9. **Test Cascading Deletion**: Copy the document ID: `select id from public.project_documents where name = 'operations.txt';`. Delete `operations.txt` in the UI. Confirm it disappears from the list, and verify in SQL that chunks were deleted:
-
-   ```sql
-   select count(*) from public.document_chunks where project_document_id = '<copied-id>'::uuid;
-   ```
-
-   The count must be `0`.
-10. **Multi-Mode Integration**: Switch to **Chat**, send a message, and verify streaming. Switch to **Spec**, submit a prompt, and verify the editable task card. Return to **Knowledge** and confirm document status remains consistent.
+```sh
+PUBLIC_ALLOWANCE_TEST_DATABASE_URL='<isolated migrated database>' \
+PUBLIC_ALLOWANCE_TEST_CONFIRM=clear-test-buckets \
+npm run allowance:verify
+```
 
 ---
 
@@ -206,7 +189,8 @@ Perform this procedure against a configured private Supabase project and Gemini 
 - **Week 2 · Structured Outputs & Task Specifications**: Non-streaming JSON generation using Gemini response schemas, server-side Zod validation, and editable task cards.
 - **Week 3 · Approved Tool Calling & Local Drafts**: Human approval gate triggering function calling (`create_task_draft`), input/output schema validation, and local draft receipt management.
 - **Week 4 · Multimodal Screenshot Intake**: Direct screenshot upload and paste (PNG/JPEG/WebP up to 5 MB), vision analysis, and conversion to structured task specifications.
-- **Week 5 · Project Knowledge Assistant & Advanced RAG**: Shared Knowledge Base with Supabase Postgres and `pgvector`, multi-format document ingestion, hybrid search with Reciprocal Rank Fusion, deterministic keyword extraction, dual-guardrail pre-checks, admin ingestion protection, and source-grounded answers.
+- **Week 5 · Portfolio Assistant & Advanced RAG**: Shared Knowledge Base with Supabase Postgres and `pgvector`, multi-format Project Document ingestion, hybrid search with Reciprocal Rank Fusion, deterministic keyword extraction, Portfolio Owner protection, and source-grounded answers.
+- **Week 6 · Trustworthy public Streamwise**: Shared public allowances, visibly degraded full-text retrieval, reviewable Answer Flags, and safe Document Replacement.
 
 ---
 
@@ -221,6 +205,7 @@ Perform this procedure against a configured private Supabase project and Gemini 
 │   │   └── knowledge/
 │   │       ├── documents/route.ts             # Project Document upload & listing endpoint
 │   │       ├── documents/[documentId]/        # Document deletion and retry endpoints
+│   │       ├── answer-flags/                   # Visitor submission and owner review endpoints
 │   │       └── questions/route.ts             # Hybrid search & Grounded Answer endpoint
 │   ├── globals.css                            # Responsive styling & themes
 │   ├── knowledge-panel.tsx                    # Knowledge Base UI, drawer, & visitor Q&A
@@ -231,15 +216,16 @@ Perform this procedure against a configured private Supabase project and Gemini 
 │   ├── task-spec.ts                           # Zod schemas for task specifications & drafts
 │   └── knowledge/
 │       ├── chunks.ts                          # Document chunking & heading extraction
+│       ├── answer-flags.ts                    # Signed response identity creation and verification
 │       ├── extractors.ts                      # Multi-format parsers (PDF, HTML, JSON, CSV)
 │       ├── indexing.ts                        # Chunk embedding & vector preparation
-│       └── server.ts                          # Supabase client, hybrid search, & admin auth
+│       └── server.ts                          # Supabase client, hybrid search, & Portfolio Owner authorization
 ├── scripts/
 │   ├── apply-migration.mjs                    # Direct migration runner
 │   └── validate-migrations.mjs                # Migration invariant & ordering validator
 ├── supabase/
 │   ├── migrations/                            # Versioned schema migrations
 │   └── verify_knowledge_schema.sql            # Read-only post-migration schema verification
-├── docs/                                      # ADRs, specs, tickets, and agent guidelines
+├── docs/                                      # ADRs, historical plans, smoke proof, and agent guidelines
 └── GLOSSARY.md                                # Official domain language & terminology
 ```

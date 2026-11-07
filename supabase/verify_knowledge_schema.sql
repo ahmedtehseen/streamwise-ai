@@ -19,7 +19,7 @@ select
       and class.relname in ('knowledge_bases', 'project_documents', 'document_chunks')
   ) as knowledge_tables_have_rls,
   (
-    select count(*) = 5
+    select count(*) = 10
     from pg_proc as procedure
     join pg_namespace as namespace on namespace.oid = procedure.pronamespace
     where namespace.nspname = 'public'
@@ -28,12 +28,65 @@ select
         'complete_project_document_indexing',
         'fail_project_document_indexing',
         'retry_project_document_indexing',
-        'match_ready_document_chunks'
+        'begin_project_document_replacement',
+        'retry_project_document_replacement',
+        'discard_project_document_replacement',
+        'match_ready_document_chunks',
+        'match_ready_document_chunks_hybrid',
+        'match_ready_document_chunks_full_text'
       )
   ) as knowledge_functions_ready,
+  exists (
+    select 1 from pg_attribute
+    where attrelid = 'public.project_documents'::regclass
+      and attname = 'replaces_document_id'
+      and not attisdropped
+  ) as document_replacement_link_ready,
+  exists (
+    select 1 from pg_indexes
+    where schemaname = 'public'
+      and indexname = 'project_documents_one_pending_replacement'
+      and indexdef ilike '%where (replaces_document_id is not null)%'
+  ) as one_pending_replacement_enforced,
   exists (
     select 1
     from public.knowledge_bases
     where id = '00000000-0000-0000-0000-000000000001'
-      and name = 'Shared private Knowledge Base'
-  ) as shared_private_knowledge_base_ready;
+      and name = 'Portfolio Owner Knowledge Base'
+  ) as portfolio_owner_knowledge_base_ready,
+  exists (
+    select 1
+    from pg_class as class
+    join pg_namespace as namespace on namespace.oid = class.relnamespace
+    where namespace.nspname = 'public'
+      and class.relname = 'public_allowance_buckets'
+      and class.relrowsecurity
+  ) as public_allowance_buckets_have_rls,
+  exists (
+    select 1
+    from pg_proc as procedure
+    join pg_namespace as namespace on namespace.oid = procedure.pronamespace
+    where namespace.nspname = 'public'
+      and procedure.proname = 'admit_public_action'
+  ) as public_allowance_admission_ready,
+  exists (
+    select 1
+    from pg_class as class
+    join pg_namespace as namespace on namespace.oid = class.relnamespace
+    where namespace.nspname = 'public'
+      and class.relname = 'answer_flags'
+      and class.relrowsecurity
+  ) as answer_flags_have_rls,
+  exists (
+    select 1 from pg_attribute
+    where attrelid = 'public.answer_flags'::regclass
+      and attname = 'response_id'
+      and not attisdropped
+  ) as answer_flags_preserve_response_identity,
+  (
+    select count(*) = 2
+    from pg_proc as procedure
+    join pg_namespace as namespace on namespace.oid = procedure.pronamespace
+    where namespace.nspname = 'public'
+      and procedure.proname in ('submit_answer_flag', 'review_answer_flag')
+  ) as answer_flag_functions_ready;

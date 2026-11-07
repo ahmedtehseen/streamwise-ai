@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Streamwise AI",
-  description: "A Gemini learning project for streaming chat, structured output, tool calling, and multimodal task intake",
+  description: "Public AI workflows and a source-grounded Portfolio Assistant backed by a Portfolio Owner-managed Knowledge Base",
   icons: {
     icon: "/icon.svg"
   }

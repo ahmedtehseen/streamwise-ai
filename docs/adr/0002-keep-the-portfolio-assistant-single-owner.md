@@ -1,0 +1,3 @@
+# Keep the Portfolio Assistant single-owner
+
+Streamwise AI will provide public, anonymous access to Chat, Spec generation, task drafts, and the Portfolio Assistant while reserving Knowledge Base administration for the Portfolio Owner through a revocable secret. All public AI capabilities share one Visitor allowance and one global allowance. Accounts, multi-user workspaces, project-scoped retrieval, and per-document permissions are deferred because they do not serve the personal portfolio use case and would add operating and implementation cost; public usage will instead be bounded to protect the Gemini and Supabase free tiers.

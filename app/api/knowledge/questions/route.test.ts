@@ -31,8 +31,11 @@ vi.mock("@supabase/supabase-js", () => ({
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("../../../../lib/public-allowance", () => ({
+  admitPublicAction: vi.fn(async () => null)
+}));
 
-describe("Project Knowledge Assistant question API", () => {
+describe("Portfolio Assistant question API", () => {
   beforeEach(() => {
     vi.resetModules();
     database.readyDocumentCount = 0;
@@ -136,6 +139,8 @@ describe("Project Knowledge Assistant question API", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       outcome: "answered",
+      responseId: expect.any(String),
+      respondedAt: expect.any(String),
       paragraphs: [{
         text: "Atlas deploys on Fridays, with release review at 14:00 UTC.",
         sourceReferences: [
@@ -226,7 +231,21 @@ describe("Project Knowledge Assistant question API", () => {
     const response = await ask("What is the Atlas budget?");
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ outcome: "insufficient_evidence", paragraphs: [] });
+    await expect(response.json()).resolves.toEqual({ outcome: "insufficient_evidence", paragraphs: [], responseId: expect.any(String), respondedAt: expect.any(String) });
+  });
+
+  it("issues a server-verifiable identity and response time for every flaggable response", async () => {
+    readyChunk();
+    stubGeminiAnswer({ outcome: "insufficient_evidence", paragraphs: [] });
+
+    const response = await ask("What is the Atlas budget?");
+    const payload = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(payload.responseId).toEqual(expect.any(String));
+    expect(String(payload.responseId)).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+    expect(payload.respondedAt).toEqual(expect.any(String));
+    expect(Number.isNaN(Date.parse(String(payload.respondedAt)))).toBe(false);
   });
 
   it("returns Insufficient Evidence immediately without generating an answer when all chunks exceed the distance threshold", async () => {
@@ -246,7 +265,7 @@ describe("Project Knowledge Assistant question API", () => {
     const response = await ask("What is the Atlas budget?");
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ outcome: "insufficient_evidence", paragraphs: [] });
+    await expect(response.json()).resolves.toEqual({ outcome: "insufficient_evidence", paragraphs: [], responseId: expect.any(String), respondedAt: expect.any(String) });
     expect(requests).toHaveLength(1);
     expect(requests[0].url).toContain(":embedContent");
   });
@@ -274,6 +293,8 @@ describe("Project Knowledge Assistant question API", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       outcome: "answered",
+      responseId: expect.any(String),
+      respondedAt: expect.any(String),
       paragraphs: [{
         text: "Ahmed boosted pgvector performance by 8x.",
         sourceReferences: [{
@@ -287,6 +308,122 @@ describe("Project Knowledge Assistant question API", () => {
       }]
     });
     expect(requests).toHaveLength(2);
+  });
+
+  it("returns a visibly degraded Grounded Answer from exact keyword evidence when Embedding 2 is temporarily unavailable", async () => {
+    database.readyDocumentCount = 1;
+    database.storedChunks = [{
+      document_status: "ready",
+      chunk_id: "chunk-keyword-hit",
+      document_name: "portfolio.md",
+      text: "Ahmed optimized Next.js pgvector performance by 8x.",
+      heading_path: ["Performance"],
+      start_line: 5,
+      end_line: 5,
+      cosine_distance: 1,
+      fts_rank: 0.65
+    }];
+    let providerRequest = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      providerRequest += 1;
+      if (providerRequest <= 2) {
+        return Response.json({ error: { message: "quota exhausted" } }, { status: 429 });
+      }
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({
+        outcome: "answered",
+        paragraphs: [{ text: "Ahmed boosted pgvector performance by 8x.", chunkIds: ["source-1"] }]
+      }) }] } }] });
+    }));
+
+    const response = await ask("What did Ahmed do for pgvector performance?");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      outcome: "answered",
+      degradedSearch: true,
+      responseId: expect.any(String),
+      respondedAt: expect.any(String),
+      paragraphs: [{
+        text: "Ahmed boosted pgvector performance by 8x.",
+        sourceReferences: [{
+          id: "source-1",
+          documentName: "portfolio.md",
+          headingPath: ["Performance"],
+          startLine: 5,
+          endLine: 5,
+          excerpt: "Ahmed optimized Next.js pgvector performance by 8x."
+        }]
+      }]
+    });
+    expect(database.rpcCalls).toEqual([{
+      name: "match_ready_document_chunks_full_text",
+      parameters: { p_query_text: "Ahmed pgvector performance", p_match_count: 5 }
+    }]);
+    expect(providerRequest).toBe(3);
+  });
+
+  it("returns visibly degraded Insufficient Evidence without answer generation when full-text search finds no keyword evidence", async () => {
+    database.readyDocumentCount = 1;
+    database.storedChunks = [];
+    const provider = vi.fn(async () => Response.json(
+      { error: { message: "temporarily unavailable" } },
+      { status: 503 }
+    ));
+    vi.stubGlobal("fetch", provider);
+
+    const response = await ask("What is the Atlas budget?");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      outcome: "insufficient_evidence",
+      paragraphs: [],
+      degradedSearch: true,
+      responseId: expect.any(String),
+      respondedAt: expect.any(String)
+    });
+    expect(database.rpcCalls).toEqual([{
+      name: "match_ready_document_chunks_full_text",
+      parameters: { p_query_text: "Atlas budget", p_match_count: 5 }
+    }]);
+    expect(provider).toHaveBeenCalledTimes(2);
+  });
+
+  it("degrades retrieval after an Embedding 2 request timeout", async () => {
+    database.readyDocumentCount = 1;
+    database.storedChunks = [];
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("request timeout", { status: 408 })));
+
+    const response = await ask("What is the Atlas budget?");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      outcome: "insufficient_evidence",
+      paragraphs: [],
+      degradedSearch: true,
+      responseId: expect.any(String),
+      respondedAt: expect.any(String)
+    });
+    expect(database.rpcCalls[0].name).toBe("match_ready_document_chunks_full_text");
+  });
+
+  it("degrades retrieval after a temporary Embedding 2 network failure", async () => {
+    database.readyDocumentCount = 1;
+    database.storedChunks = [];
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new TypeError("network unavailable");
+    }));
+
+    const response = await ask("What is the Atlas budget?");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      outcome: "insufficient_evidence",
+      paragraphs: [],
+      degradedSearch: true,
+      responseId: expect.any(String),
+      respondedAt: expect.any(String)
+    });
+    expect(database.rpcCalls[0].name).toBe("match_ready_document_chunks_full_text");
   });
 
   it("treats injected Project Document text and the question as delimited untrusted evidence", async () => {
@@ -306,6 +443,31 @@ describe("Project Knowledge Assistant question API", () => {
   it("rejects an invented Source Reference instead of returning a partial answer", async () => {
     readyChunk();
     stubGeminiAnswer({ outcome: "answered", paragraphs: [{ text: "Atlas deploys on Fridays.", chunkIds: ["source-999"] }] });
+
+    const response = await ask();
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: "Gemini cited a passage that was not retrieved.",
+      code: "invalid_model_output",
+      retryable: false
+    });
+  });
+
+  it("applies the same Source Reference validation to a degraded Grounded Answer", async () => {
+    readyChunk();
+    database.storedChunks[0].fts_rank = 0.5;
+    let providerRequest = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      providerRequest += 1;
+      if (providerRequest <= 2) {
+        return Response.json({ error: { message: "temporarily unavailable" } }, { status: 503 });
+      }
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({
+        outcome: "answered",
+        paragraphs: [{ text: "Atlas deploys on Fridays.", chunkIds: ["source-999"] }]
+      }) }] } }] });
+    }));
 
     const response = await ask();
 
@@ -358,8 +520,7 @@ describe("Project Knowledge Assistant question API", () => {
   });
 
   it.each([
-    [401, "gemini_authentication_failed", false, "Gemini authentication failed.", 502],
-    [429, "gemini_throttled", true, "Gemini is temporarily rate limited.", 503]
+    [401, "gemini_authentication_failed", false, "Gemini authentication failed.", 502]
   ])("maps Gemini embedding failure %i before retrieval", async (providerStatus, code, retryable, error, responseStatus) => {
     readyChunk();
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: { message: "provider failure" } }, { status: providerStatus })));
@@ -368,6 +529,47 @@ describe("Project Knowledge Assistant question API", () => {
 
     expect(response.status).toBe(responseStatus);
     await expect(response.json()).resolves.toEqual({ error, code, retryable });
+    expect(database.rpcCalls).toHaveLength(0);
+  });
+
+  it("retries an eligible embedding failure once with bounded backoff before degrading", async () => {
+    readyChunk();
+    database.storedChunks = [];
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const delays: number[] = [];
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((handler: TimerHandler, delay?: number) => {
+      delays.push(delay ?? 0);
+      queueMicrotask(() => typeof handler === "function" && handler());
+      return 1;
+    }) as typeof setTimeout);
+    const provider = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: { message: "temporarily unavailable" } }, { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ embedding: { values: [1, ...Array.from({ length: 767 }, () => 0)] } }));
+    vi.stubGlobal("fetch", provider);
+
+    const response = await ask();
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ outcome: "insufficient_evidence" });
+    expect(provider).toHaveBeenCalledTimes(2);
+    expect(delays).toEqual([150]);
+    expect(database.rpcCalls[0].name).toBe("match_ready_document_chunks_hybrid");
+  });
+
+  it("rejects an incompatible query embedding instead of degrading or mixing vector spaces", async () => {
+    readyChunk();
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      embedding: { values: [1, ...Array.from({ length: 3069 }, () => 0)] }
+    })));
+
+    const response = await ask();
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: "Gemini returned an invalid question embedding.",
+      code: "invalid_model_output",
+      retryable: false
+    });
     expect(database.rpcCalls).toHaveLength(0);
   });
 

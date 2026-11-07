@@ -1,13 +1,10 @@
+import { generationUnavailableResponse, requestPublicGeneration } from "../../../lib/public-generation";
+
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  if (!process.env.GEMINI_API_KEY) {
-    return new Response("Missing GEMINI_API_KEY. Add it to .env.local and restart the dev server.", {
-      status: 500
-    });
-  }
-
-  const { messages } = await request.json();
+  const body = await request.json().catch(() => null) as { messages?: unknown } | null;
+  const messages = body?.messages;
 
   if (!Array.isArray(messages) || messages.length === 0) {
     return new Response("Please provide at least one message.", { status: 400 });
@@ -30,26 +27,21 @@ export async function POST(request: Request) {
     return new Response("Please provide a valid message.", { status: 400 });
   }
 
-  const geminiResponse = await fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:streamGenerateContent?alt=sse",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": process.env.GEMINI_API_KEY
-      },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: "You are a concise, helpful assistant." }] },
-        contents
-      })
-    }
-  );
+  if (!process.env.GEMINI_API_KEY) {
+    return new Response("Missing GEMINI_API_KEY. Add it to .env.local and restart the dev server.", {
+      status: 500
+    });
+  }
+
+  const generation = await requestPublicGeneration(request, "streamGenerateContent", process.env.GEMINI_API_KEY, {
+      systemInstruction: { parts: [{ text: "You are a concise, helpful assistant." }] },
+      contents
+    }, "text");
+  if ("publicResponse" in generation) return generation.publicResponse;
+  const geminiResponse = generation.providerResponse;
 
   if (!geminiResponse.ok || !geminiResponse.body) {
-    const error = await geminiResponse.text();
-    return new Response(error || "Gemini could not start the stream.", {
-      status: geminiResponse.status || 502
-    });
+    return generationUnavailableResponse("text");
   }
 
   const upstreamReader = geminiResponse.body.getReader();

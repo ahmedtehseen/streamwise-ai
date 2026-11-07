@@ -12,6 +12,7 @@ type ProjectDocument = {
   retryable: boolean;
   createdAt: string;
   updatedAt: string;
+  replacement?: ProjectDocument;
 };
 
 type SourceReference = {
@@ -31,22 +32,51 @@ type GroundedAnswer = {
   paragraphs: [];
 };
 
+type KnowledgeResponse = GroundedAnswer & {
+  degradedSearch?: boolean;
+  responseId: string;
+  respondedAt: string;
+};
+
+type AnswerFlag = {
+  id: string;
+  question: string;
+  outcome: "answered" | "insufficient_evidence";
+  responseContent: { paragraphs: Array<{ text: string; sourceReferences: SourceReference[] }>; degradedSearch: boolean };
+  sourceReferences: SourceReference[];
+  respondedAt: string;
+  note: string | null;
+  status: "open" | "reviewed";
+  reviewedAt: string | null;
+  createdAt: string;
+};
+
 export default function KnowledgePanel() {
   const [documents, setDocuments] = useState<ProjectDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [question, setQuestion] = useState("");
   const [isAsking, setIsAsking] = useState(false);
-  const [answer, setAnswer] = useState<GroundedAnswer | null>(null);
+  const [answer, setAnswer] = useState<KnowledgeResponse | null>(null);
   const [selectedSource, setSelectedSource] = useState<SourceReference | null>(null);
   const [deletingDocumentIds, setDeletingDocumentIds] = useState<string[]>([]);
   const [retryingDocumentId, setRetryingDocumentId] = useState<string | null>(null);
+  const [replacingDocumentId, setReplacingDocumentId] = useState<string | null>(null);
+  const [discardingReplacementId, setDiscardingReplacementId] = useState<string | null>(null);
   const [documentError, setDocumentError] = useState<string | null>(null);
   const [questionError, setQuestionError] = useState<string | null>(null);
   const [isDocumentDrawerOpen, setIsDocumentDrawerOpen] = useState(false);
   const [selectedUploadName, setSelectedUploadName] = useState<string | null>(null);
   const [askingStep, setAskingStep] = useState<string | null>(null);
   const [adminKey, setAdminKey] = useState("");
+  const [flagNote, setFlagNote] = useState("");
+  const [flagState, setFlagState] = useState<"idle" | "submitting" | "submitted">("idle");
+  const [flagError, setFlagError] = useState<string | null>(null);
+  const [answerFlags, setAnswerFlags] = useState<AnswerFlag[]>([]);
+  const [isLoadingFlags, setIsLoadingFlags] = useState(false);
+  const [flagsLoaded, setFlagsLoaded] = useState(false);
+  const [flagReviewError, setFlagReviewError] = useState<string | null>(null);
+  const [reviewingFlagId, setReviewingFlagId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const drawerRef = useRef<HTMLElement>(null);
   const drawerCloseRef = useRef<HTMLButtonElement>(null);
@@ -165,6 +195,9 @@ export default function KnowledgePanel() {
     if (!question.trim() || !hasReadyDocument || isAsking) return;
     setQuestionError(null);
     setAnswer(null);
+    setFlagNote("");
+    setFlagState("idle");
+    setFlagError(null);
     setSelectedSource(null);
     setIsAsking(true);
     setAskingStep("Searching Knowledge Base…");
@@ -183,7 +216,7 @@ export default function KnowledgePanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: question.trim() })
       });
-      const payload = await response.json() as GroundedAnswer | { error?: string };
+      const payload = await response.json() as KnowledgeResponse | { error?: string };
       if (!response.ok || !("outcome" in payload)) {
         throw new Error("error" in payload && payload.error ? payload.error : "A Grounded Answer could not be generated.");
       }
@@ -195,6 +228,65 @@ export default function KnowledgePanel() {
       clearTimeout(timer2);
       setIsAsking(false);
       setAskingStep(null);
+    }
+  }
+
+  async function submitAnswerFlag(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!answer || flagState !== "idle") return;
+    setFlagError(null);
+    setFlagState("submitting");
+    try {
+      const response = await fetch("/api/knowledge/answer-flags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ responseId: answer.responseId, ...(flagNote.trim() ? { note: flagNote.trim() } : {}) })
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "The Answer Flag could not be submitted.");
+      setFlagState("submitted");
+    } catch (caughtError) {
+      setFlagState("idle");
+      setFlagError(caughtError instanceof Error ? caughtError.message : "The Answer Flag could not be submitted.");
+    }
+  }
+
+  async function loadAnswerFlags() {
+    if (isLoadingFlags) return;
+    setFlagReviewError(null);
+    setIsLoadingFlags(true);
+    try {
+      const headers: Record<string, string> = {};
+      if (adminKey.trim()) headers["x-admin-key"] = adminKey.trim();
+      const response = await fetch("/api/knowledge/answer-flags", { headers });
+      const payload = await response.json() as { flags?: AnswerFlag[]; error?: string };
+      if (!response.ok || !payload.flags) throw new Error(payload.error || "Answer Flags could not be loaded.");
+      setAnswerFlags(payload.flags);
+      setFlagsLoaded(true);
+    } catch (caughtError) {
+      setFlagReviewError(caughtError instanceof Error ? caughtError.message : "Answer Flags could not be loaded.");
+    } finally {
+      setIsLoadingFlags(false);
+    }
+  }
+
+  async function reviewAnswerFlag(flagId: string) {
+    if (reviewingFlagId) return;
+    setFlagReviewError(null);
+    setReviewingFlagId(flagId);
+    try {
+      const headers: Record<string, string> = {};
+      if (adminKey.trim()) headers["x-admin-key"] = adminKey.trim();
+      const response = await fetch(`/api/knowledge/answer-flags/${encodeURIComponent(flagId)}`, { method: "PATCH", headers });
+      const payload = await response.json() as { flag?: { reviewedAt: string }; error?: string };
+      if (!response.ok || !payload.flag) throw new Error(payload.error || "The Answer Flag could not be reviewed.");
+      setAnswerFlags((current) => current.map((flag) => flag.id === flagId
+        ? { ...flag, status: "reviewed", reviewedAt: payload.flag!.reviewedAt }
+        : flag));
+    } catch (caughtError) {
+      setFlagReviewError(caughtError instanceof Error ? caughtError.message : "The Answer Flag could not be reviewed.");
+    } finally {
+      setReviewingFlagId(null);
     }
   }
 
@@ -246,14 +338,105 @@ export default function KnowledgePanel() {
     }
   }
 
+  async function replaceDocument(document: ProjectDocument, file: File) {
+    if (replacingDocumentId || document.replacement) return;
+    setDocumentError(null);
+    setReplacingDocumentId(document.id);
+    const now = new Date().toISOString();
+    const pending: ProjectDocument = {
+      id: `replacement-${crypto.randomUUID()}`,
+      name: file.name,
+      mediaType: file.type,
+      byteSize: file.size,
+      status: "indexing",
+      failureDetail: null,
+      retryable: false,
+      createdAt: now,
+      updatedAt: now
+    };
+    setDocuments((current) => current.map((item) => item.id === document.id ? { ...item, replacement: pending } : item));
+    try {
+      const formData = new FormData();
+      formData.set("document", file);
+      const headers: Record<string, string> = {};
+      if (adminKey.trim()) headers["x-admin-key"] = adminKey.trim();
+      const response = await fetch(`/api/knowledge/documents/${encodeURIComponent(document.id)}/replacement`, { method: "POST", headers, body: formData });
+      const payload = await response.json() as { document?: ProjectDocument; replacement?: ProjectDocument; error?: string };
+      if (response.ok && payload.document) {
+        setDocuments((current) => current.map((item) => item.id === document.id ? payload.document! : item));
+        setAnswer(null);
+        setSelectedSource(null);
+        return;
+      }
+      setDocuments((current) => current.map((item) => item.id === document.id
+        ? { ...item, replacement: payload.replacement }
+        : item));
+      throw new Error(payload.error || "The Document Replacement could not be processed.");
+    } catch (caughtError) {
+      setDocuments((current) => current.map((item) => item.id === document.id && item.replacement?.id === pending.id
+        ? { ...item, replacement: undefined }
+        : item));
+      setDocumentError(caughtError instanceof Error ? caughtError.message : "The Document Replacement could not be processed.");
+    } finally {
+      setReplacingDocumentId(null);
+    }
+  }
+
+  async function retryReplacement(document: ProjectDocument) {
+    if (!document.replacement || retryingDocumentId) return;
+    setDocumentError(null);
+    setRetryingDocumentId(document.id);
+    setDocuments((current) => current.map((item) => item.id === document.id && item.replacement
+      ? { ...item, replacement: { ...item.replacement, status: "indexing", failureDetail: null, retryable: false } }
+      : item));
+    try {
+      const headers: Record<string, string> = {};
+      if (adminKey.trim()) headers["x-admin-key"] = adminKey.trim();
+      const response = await fetch(`/api/knowledge/documents/${encodeURIComponent(document.id)}/replacement/retry`, { method: "POST", headers });
+      const payload = await response.json() as { document?: ProjectDocument; replacement?: ProjectDocument; error?: string };
+      if (response.ok && payload.document) {
+        setDocuments((current) => current.map((item) => item.id === document.id ? payload.document! : item));
+        setAnswer(null);
+        setSelectedSource(null);
+        return;
+      }
+      if (payload.replacement) setDocuments((current) => current.map((item) => item.id === document.id ? { ...item, replacement: payload.replacement } : item));
+      throw new Error(payload.error || "The Document Replacement could not be retried.");
+    } catch (caughtError) {
+      setDocumentError(caughtError instanceof Error ? caughtError.message : "The Document Replacement could not be retried.");
+    } finally {
+      setRetryingDocumentId(null);
+    }
+  }
+
+  async function discardReplacement(document: ProjectDocument) {
+    if (!document.replacement || discardingReplacementId) return;
+    setDocumentError(null);
+    setDiscardingReplacementId(document.id);
+    try {
+      const headers: Record<string, string> = {};
+      if (adminKey.trim()) headers["x-admin-key"] = adminKey.trim();
+      const response = await fetch(`/api/knowledge/documents/${encodeURIComponent(document.id)}/replacement`, { method: "DELETE", headers });
+      if (!response.ok) {
+        const payload = await response.json() as { error?: string };
+        throw new Error(payload.error || "The Document Replacement could not be discarded.");
+      }
+      setDocuments((current) => current.map((item) => item.id === document.id ? { ...item, replacement: undefined } : item));
+    } catch (caughtError) {
+      setDocumentError(caughtError instanceof Error ? caughtError.message : "The Document Replacement could not be discarded.");
+    } finally {
+      setDiscardingReplacementId(null);
+    }
+  }
+
   return (
     <section className="knowledge-panel" aria-labelledby="knowledge-heading">
       <div className="knowledge-canvas">
         <header className="knowledge-intro">
           <div>
-            <p className="eyebrow">Shared private Knowledge Base</p>
-            <h2 id="knowledge-heading">Ask your project</h2>
-            <p>Get answers grounded in the documents your team has added.</p>
+            <p className="eyebrow">Portfolio Assistant</p>
+            <h2 id="knowledge-heading">Ask about the Portfolio Owner</h2>
+            <p>Get answers grounded in Project Documents selected by the Portfolio Owner.</p>
           </div>
           <button
             ref={drawerTriggerRef}
@@ -332,6 +515,11 @@ export default function KnowledgePanel() {
             <span>{askingStep}</span>
           </div>
         )}
+        {answer?.degradedSearch && (
+          <p className="knowledge-degraded" role="status">
+            Semantic search is temporarily unavailable. These keyword results may be less complete.
+          </p>
+        )}
         {answer?.outcome === "insufficient_evidence" && <p className="knowledge-empty">The Knowledge Base does not contain enough evidence to answer that question.</p>}
         {answer?.outcome === "answered" && (
           <article className="grounded-answer" aria-live="polite">
@@ -357,6 +545,33 @@ export default function KnowledgePanel() {
             )}
           </article>
         )}
+        {answer && (
+          <form className="answer-flag-form" onSubmit={submitAnswerFlag}>
+            <div>
+              <strong>Something not right?</strong>
+              <span>Flag this response for the Portfolio Owner. This will not change answers automatically.</span>
+            </div>
+            {flagState !== "submitted" ? (
+              <>
+                <label htmlFor="answer-flag-note">Optional note</label>
+                <textarea
+                  id="answer-flag-note"
+                  value={flagNote}
+                  onChange={(event) => setFlagNote(event.target.value)}
+                  maxLength={500}
+                  rows={2}
+                  placeholder="Briefly explain what seems incorrect or unhelpful"
+                  disabled={flagState === "submitting"}
+                />
+                <div className="answer-flag-footer">
+                  <span>{flagNote.length}/500</span>
+                  <button type="submit" disabled={flagState === "submitting"}>{flagState === "submitting" ? "Submitting…" : "Flag response"}</button>
+                </div>
+              </>
+            ) : <p className="answer-flag-success" role="status">Flag submitted for owner review.</p>}
+            {flagError && <p className="knowledge-error" role="alert">{flagError}</p>}
+          </form>
+        )}
       </div>
 
       {isDocumentDrawerOpen && (
@@ -368,11 +583,11 @@ export default function KnowledgePanel() {
             </header>
             <div className="document-drawer-content">
               <div style={{ marginBottom: "1rem", padding: "0.5rem", borderRadius: "0.375rem", border: "1px solid rgba(255, 255, 255, 0.15)" }}>
-                <label htmlFor="admin-key-input" style={{ fontSize: "0.75rem", display: "block", marginBottom: "0.25rem", opacity: 0.8 }}>Admin / Owner Key (Required if ADMIN_SECRET is set)</label>
+                <label htmlFor="admin-key-input" style={{ fontSize: "0.75rem", display: "block", marginBottom: "0.25rem", opacity: 0.8 }}>Portfolio Owner secret</label>
                 <input
                   id="admin-key-input"
                   type="password"
-                  placeholder="Enter admin secret to upload or delete"
+                  placeholder="Enter owner secret to manage documents"
                   value={adminKey}
                   onChange={(e) => {
                     setAdminKey(e.target.value);
@@ -381,6 +596,29 @@ export default function KnowledgePanel() {
                   style={{ width: "100%", padding: "0.35rem 0.5rem", fontSize: "0.825rem", background: "transparent", border: "1px solid rgba(255, 255, 255, 0.2)", borderRadius: "0.25rem", color: "inherit" }}
                 />
               </div>
+
+              <section className="answer-flag-review" aria-labelledby="answer-flags-heading">
+                <div className="answer-flag-review-heading">
+                  <div><strong id="answer-flags-heading">Answer Flags</strong><span>Private owner review</span></div>
+                  <button type="button" onClick={loadAnswerFlags} disabled={isLoadingFlags}>{isLoadingFlags ? "Loading…" : flagsLoaded ? "Refresh" : "Load flags"}</button>
+                </div>
+                {flagReviewError && <p className="knowledge-error" role="alert">{flagReviewError}</p>}
+                {flagsLoaded && answerFlags.length === 0 && <p className="knowledge-empty">No Answer Flags yet.</p>}
+                {answerFlags.length > 0 && (
+                  <ul className="answer-flag-list">
+                    {answerFlags.map((flag) => (
+                      <li key={flag.id}>
+                        <div className="answer-flag-meta"><span className={`answer-flag-status ${flag.status}`}>{flag.status}</span><time dateTime={flag.respondedAt}>{new Date(flag.respondedAt).toLocaleString()}</time></div>
+                        <strong>{flag.question}</strong>
+                        <p>{flag.outcome === "answered" ? flag.responseContent.paragraphs.map((paragraph) => paragraph.text).join(" ") : "Insufficient Evidence"}</p>
+                        {flag.responseContent.degradedSearch && <span className="answer-flag-degraded">Degraded keyword search</span>}
+                        {flag.note && <blockquote>{flag.note}</blockquote>}
+                        {flag.status === "open" && <button type="button" onClick={() => reviewAnswerFlag(flag.id)} disabled={reviewingFlagId !== null}>{reviewingFlagId === flag.id ? "Marking…" : "Mark reviewed"}</button>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
 
               <form className="knowledge-upload" onSubmit={uploadDocument}>
                 <div className="knowledge-upload-heading"><strong>Add a document</strong><span>PDF, MD, TXT, HTML, JSON, CSV · max 500 KB</span></div>
@@ -409,7 +647,40 @@ export default function KnowledgePanel() {
                             {retryingDocumentId === document.id ? "Retrying…" : "Retry"}
                           </button>
                         )}
+                        {document.status === "ready" && !document.replacement && (
+                          <>
+                            <input
+                              className="sr-only"
+                              id={`replace-${document.id}`}
+                              type="file"
+                              accept=".md,.markdown,.txt,.pdf,.html,.htm,.json,.csv,text/markdown,text/plain,application/pdf,text/html,application/json,text/csv"
+                              disabled={replacingDocumentId !== null}
+                              onChange={(event) => {
+                                const file = event.target.files?.[0];
+                                if (file) void replaceDocument(document, file);
+                                event.target.value = "";
+                              }}
+                            />
+                            <label className="document-delete" htmlFor={`replace-${document.id}`}>
+                              {replacingDocumentId === document.id ? "Replacing…" : "Replace"}
+                            </label>
+                          </>
+                        )}
                       </div>
+                      {document.replacement && (
+                        <div className="document-details" aria-label={`Pending replacement for ${document.name}`}>
+                          <strong title={document.replacement.name}>Replacement: {document.replacement.name}</strong>
+                          <span>{Math.max(1, Math.ceil(document.replacement.byteSize / 1024))} KB · {formatMediaType(document.replacement.mediaType)}</span>
+                          <span className={`document-status ${document.replacement.status}`}><i aria-hidden="true" />{document.replacement.status}</span>
+                          {document.replacement.failureDetail && <span className="document-failure">{document.replacement.failureDetail}</span>}
+                          {document.replacement.status === "failed" && (
+                            <div className="document-actions">
+                              {document.replacement.retryable && <button type="button" onClick={() => retryReplacement(document)} disabled={retryingDocumentId !== null}>{retryingDocumentId === document.id ? "Retrying…" : "Retry replacement"}</button>}
+                              <button type="button" onClick={() => discardReplacement(document)} disabled={discardingReplacementId !== null}>{discardingReplacementId === document.id ? "Discarding…" : "Discard replacement"}</button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ul>
