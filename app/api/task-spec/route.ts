@@ -1,5 +1,6 @@
 import { taskSpecJsonSchema, taskSpecSchema } from "../../../lib/task-spec";
 import { hasValidImageSignature, isSupportedImageType, MAX_IMAGE_BYTES } from "../../../lib/image-upload";
+import { requestPublicGeneration } from "../../../lib/public-generation";
 
 export const runtime = "nodejs";
 
@@ -44,17 +45,12 @@ export async function POST(request: Request) {
     parts.push({ text: `Turn this request into a concise, buildable task specification. Preserve explicit constraints, do not invent requirements, and make acceptance criteria testable. Request: ${taskRequest}` });
   }
 
-  const geminiResponse = await fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts }],
-        generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseSchema: taskSpecJsonSchema }
-      })
-    }
-  );
+  const generation = await requestPublicGeneration(request, "generateContent", process.env.GEMINI_API_KEY, {
+      contents: [{ role: "user", parts }],
+      generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseSchema: taskSpecJsonSchema }
+    });
+  if ("publicResponse" in generation) return generation.publicResponse;
+  const geminiResponse = generation.providerResponse;
 
   if (!geminiResponse.ok) {
     const fallback = "Gemini could not create the task specification. Please try again.";

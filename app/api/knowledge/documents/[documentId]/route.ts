@@ -12,7 +12,7 @@ export async function DELETE(
   { params }: { params: Promise<{ documentId: string }> }
 ) {
   if (!verifyAdminAccess(request)) {
-    return Response.json({ error: "Unauthorized. An Admin Key is required to delete Project Documents." }, { status: 401 });
+    return Response.json({ error: "Unauthorized. The Portfolio Owner secret is required to delete Project Documents." }, { status: 401 });
   }
 
   try {

@@ -9,7 +9,7 @@ export async function POST(
   context: { params: Promise<{ documentId: string }> }
 ) {
   if (!verifyAdminAccess(request)) {
-    return Response.json({ error: "Unauthorized. An Admin Key is required to retry Project Document indexing." }, { status: 401 });
+    return Response.json({ error: "Unauthorized. The Portfolio Owner secret is required to retry Project Document indexing." }, { status: 401 });
   }
 
   let configuration: ReturnType<typeof knowledgeConfiguration>;

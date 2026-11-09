@@ -30,6 +30,18 @@ function formatDate(timestamp: number) {
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(timestamp);
 }
 
+async function responseError(response: Response, fallback: string) {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+    if (typeof payload?.error === "string") return payload.error;
+  } else {
+    const message = await response.text().catch(() => "");
+    if (message) return message;
+  }
+  return fallback;
+}
+
 function useObjectUrl(file: File | null) {
   const [url, setUrl] = useState<string | null>(null);
 
@@ -300,7 +312,7 @@ export default function Home() {
 
     try {
       const response = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: messagesForRequest.map(({ role, content }) => ({ role, content })) }) });
-      if (!response.ok || !response.body) throw new Error((await response.text()) || "The AI request could not be started.");
+      if (!response.ok || !response.body) throw new Error(await responseError(response, "The AI request could not be started."));
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       while (true) {
@@ -430,8 +442,8 @@ export default function Home() {
 
       <section className="chat-panel">
         <header className="topbar">
-          <div className="chat-heading"><details className="learning-status"><summary>Week 5 · Project knowledge <span className="status-chevron" aria-hidden="true" /></summary><div className="learning-log"><p><strong>Week 1</strong><span>Streaming chat, history, deployment</span></p><p><strong>Week 2</strong><span>JSON schema, Zod validation, editable specs</span></p><p><strong>Week 3</strong><span>Tool calling, approval, local draft workflow</span></p><p><strong>Week 4</strong><span>Screenshot intake, vision analysis, upload states</span></p><p className="current"><strong>Week 5</strong><span>Durable Project Documents and embeddings</span></p></div></details><h1>{mode === "knowledge" ? "Knowledge" : activeConversation?.title ?? (mode === "spec" ? "New task spec" : "New conversation")}</h1></div>
-          <nav className="mode-switch" aria-label="Application mode"><button type="button" className={mode === "chat" ? "active" : ""} onClick={() => selectMode("chat")} aria-pressed={mode === "chat"}>Chat</button><button type="button" className={mode === "spec" ? "active" : ""} onClick={() => selectMode("spec")} aria-pressed={mode === "spec"}>Spec</button><button type="button" className={mode === "knowledge" ? "active" : ""} onClick={() => selectMode("knowledge")} aria-pressed={mode === "knowledge"}>Knowledge</button></nav>
+          <div className="chat-heading"><details className="learning-status"><summary>Week 6 · Trustworthy public Streamwise <span className="status-chevron" aria-hidden="true" /></summary><div className="learning-log"><p><strong>Week 1</strong><span>Streaming chat, history, deployment</span></p><p><strong>Week 2</strong><span>JSON schema, Zod validation, editable specs</span></p><p><strong>Week 3</strong><span>Tool calling, approval, local draft workflow</span></p><p><strong>Week 4</strong><span>Screenshot intake, vision analysis, upload states</span></p><p><strong>Week 5</strong><span>Durable Project Documents and embeddings</span></p><p className="current"><strong>Week 6</strong><span>Shared allowances, safe degradation, and owner review</span></p></div></details><h1>{mode === "knowledge" ? "Portfolio Assistant" : activeConversation?.title ?? (mode === "spec" ? "New task spec" : "New conversation")}</h1></div>
+          <nav className="mode-switch" aria-label="Application mode"><button type="button" className={mode === "chat" ? "active" : ""} onClick={() => selectMode("chat")} aria-pressed={mode === "chat"}>Chat</button><button type="button" className={mode === "spec" ? "active" : ""} onClick={() => selectMode("spec")} aria-pressed={mode === "spec"}>Spec</button><button type="button" className={mode === "knowledge" ? "active" : ""} onClick={() => selectMode("knowledge")} aria-pressed={mode === "knowledge"}>Portfolio Assistant</button></nav>
         </header>
         {mode === "knowledge" ? <KnowledgePanel /> : <>
         <section className="thread" aria-live="polite" aria-label="Chat messages">
