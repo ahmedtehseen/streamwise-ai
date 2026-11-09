@@ -40,6 +40,10 @@ _Avoid_: User, guest account
 A Visitor's report that a Portfolio Assistant response may be unhelpful or incorrect and should be reviewed by the Portfolio Owner.
 _Avoid_: Rating, automatic correction
 
+**Answer Flag Review**:
+The Portfolio Owner's inspection of an Answer Flag and explicit decision to mark it reviewed without automatically changing the captured response, its Source References, or the Knowledge Base.
+_Avoid_: Automatic remediation, feedback training
+
 **Document Replacement**:
 A proposed Project Document revision that becomes available as evidence only after it is successfully processed, without interrupting the current revision.
 _Avoid_: In-place edit, version history
