@@ -2,7 +2,11 @@ import "server-only";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getAnswerFlag, listAnswerFlagsPage } from "../knowledge/answer-flag-service";
+import {
+  getAnswerFlag,
+  listAnswerFlagsPage,
+  reviewAnswerFlag
+} from "../knowledge/answer-flag-service";
 
 function resultContent(value: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(value) }] };
@@ -56,6 +60,25 @@ export function createOwnerMcpServer() {
     },
     async ({ flagId }) => {
       const result = await getAnswerFlag({ flagId });
+      return result.ok ? resultContent(result.value) : failureContent(result.error.message);
+    }
+  );
+
+  server.registerTool(
+    "review_answer_flag",
+    {
+      title: "Review Answer Flag",
+      description: "Mark the exact Answer Flag approved by the Portfolio Owner as reviewed.",
+      inputSchema: { flagId: z.string().uuid() },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      }
+    },
+    async ({ flagId }) => {
+      const result = await reviewAnswerFlag({ flagId });
       return result.ok ? resultContent(result.value) : failureContent(result.error.message);
     }
   );

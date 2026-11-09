@@ -318,10 +318,21 @@ export async function getAnswerFlag(input: { flagId: string }): Promise<AnswerFl
 export async function reviewAnswerFlag(input: {
   flagId: string;
 }): Promise<AnswerFlagServiceResult<{ id: string; status: "reviewed"; reviewedAt: string }>> {
+  const parsedFlagId = z.string().uuid().safeParse(input.flagId);
+  if (!parsedFlagId.success) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_answer_flag_query",
+        message: "Choose a valid Answer Flag identifier.",
+        status: 400
+      }
+    };
+  }
   try {
     const configuration = knowledgeDatabaseConfiguration();
     const client = createKnowledgeClient(configuration.supabaseUrl, configuration.serviceRoleKey);
-    const { data, error } = await client.rpc("review_answer_flag", { p_flag_id: input.flagId });
+    const { data, error } = await client.rpc("review_answer_flag", { p_flag_id: parsedFlagId.data });
     const parsed = reviewedFlagSchema.safeParse(data);
     if (error || !parsed.success) {
       return {

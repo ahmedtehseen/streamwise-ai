@@ -68,7 +68,7 @@ Configure the following server-side environment variables in `.env.local`:
 | `SUPABASE_URL` | Knowledge | Project URL from Supabase **Project Settings → API**. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Knowledge | Privileged service-role secret from Supabase **Project Settings → API** (server-only). |
 | `ADMIN_SECRET` | Owner operations | High-entropy Portfolio Owner secret required to upload, retry, replace, or delete Project Documents and to review Answer Flags. Production fails closed when it is absent or invalid; leaving it unset is a local-development convenience only. |
-| `MCP_OWNER_TOKEN` | Owner MCP reads | Dedicated high-entropy server-only bearer token (at least 32 non-whitespace characters) for `/api/mcp/owner`. It must be distinct from `ADMIN_SECRET`; the owner MCP endpoint fails closed in every environment when it is absent, malformed, or incorrect. |
+| `MCP_OWNER_TOKEN` | Owner MCP review | Dedicated high-entropy server-only bearer token (at least 32 non-whitespace characters) for `/api/mcp/owner` Answer Flag reads and review. It must be distinct from `ADMIN_SECRET`; the owner MCP endpoint fails closed in every environment when it is absent, malformed, or incorrect. |
 | `ANSWER_FLAG_SECRET` | Optional | Dedicated server-only secret for signing response identities. When omitted, the service-role key is used as the signing key source. |
 | `VISITOR_ID_SECRET` | Public AI routes | Server-only high-entropy secret of at least 32 characters, used to derive rotating one-way Visitor identifiers from Vercel's trusted client-address header. |
 | `SUPABASE_DB_URL` | Optional | Direct Postgres connection URI (optional; used by `scripts/apply-migration.mjs`). |
@@ -77,6 +77,27 @@ Configure the following server-side environment variables in `.env.local`:
 > Never commit `.env.local` or expose `GEMINI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_SECRET`, `MCP_OWNER_TOKEN`, `ANSWER_FLAG_SECRET`, or `VISITOR_ID_SECRET` in client components, public assets, logs, API responses, URLs, tool arguments, or `NEXT_PUBLIC_` variables. Only server-side routes use provider credentials. The Portfolio Owner enters `ADMIN_SECRET` at runtime; the application does not embed it in browser assets. MCP clients supply `MCP_OWNER_TOKEN` only through the standard `Authorization: Bearer` header.
 
 Streamwise does not implement Visitor accounts, multi-user workspaces, project-scoped permissions, or per-document authorization. The configured free Gemini tier may use submitted data to improve Google products, so this deployment does not claim suitability for private client information.
+
+### Codex owner MCP configuration
+
+Codex is the supported Week 7 owner MCP client. Export the same dedicated token configured as `MCP_OWNER_TOKEN` on the Streamwise deployment into the environment that launches Codex, then add the following to `~/.codex/config.toml` (or a trusted project's `.codex/config.toml`). Replace the example origin with the HTTPS Streamwise deployment:
+
+```toml
+approvals_reviewer = "user"
+
+[mcp_servers.streamwise_owner]
+url = "https://streamwise.example/api/mcp/owner"
+bearer_token_env_var = "MCP_OWNER_TOKEN"
+enabled_tools = ["list_answer_flags", "get_answer_flag", "review_answer_flag"]
+default_tools_approval_mode = "prompt"
+
+[mcp_servers.streamwise_owner.tools.review_answer_flag]
+approval_mode = "prompt"
+```
+
+This configuration uses Codex's environment-sourced bearer-token support, restricts discovery to the three owner Answer Flag tools, assigns approval review to the user, and requires a prompt for every `review_answer_flag` call. The owner should inspect the Answer Flag first and approve only when the prompt contains the exact UUID shown by `list_answer_flags` or `get_answer_flag`. Do not replace `prompt` with `approve`, create a saved blanket approval, put the token in the URL or configuration file, or reuse `ADMIN_SECRET`.
+
+Codex supplies the approval interaction; Streamwise receives only the subsequent tool call. Streamwise therefore cannot unit-test Codex's approval UI. It instead rechecks the bearer credential, exact UUID, and current open state on every call. MCP tool annotations accurately advertise `review_answer_flag` as a write, but annotations are hints and are not authorization or an approval control. See the official [Codex MCP configuration](https://developers.openai.com/codex/mcp), [Codex configuration reference](https://developers.openai.com/codex/config-reference), and [MCP tool annotation guidance](https://modelcontextprotocol.io/specification/2025-06-18/server/tools#tool-annotations).
 
 ### 3. Database Migrations (for Knowledge mode)
 
