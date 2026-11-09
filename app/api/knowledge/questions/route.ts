@@ -150,8 +150,8 @@ export async function POST(request: Request) {
       return flaggableResponse(question, { outcome: "insufficient_evidence", paragraphs: [], ...(degradedSearch ? { degradedSearch: true } : {}) });
     }
 
-    // Pass top 3 most relevant passages to optimize prompt processing and generation latency
-    const selectedChunks = relevantChunks.slice(0, 3);
+    // Pass all five eligible retrieved passages to answer generation.
+    const selectedChunks = relevantChunks.slice(0, 5);
     const evidence = selectedChunks.map((chunk, index) => ({ id: `source-${index + 1}`, text: chunk.text }));
     const answer = await generateGroundedAnswer(question, evidence, configuration.geminiApiKey);
     if (answer.outcome === "insufficient_evidence") {
