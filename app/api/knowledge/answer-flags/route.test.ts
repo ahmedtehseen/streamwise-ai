@@ -22,6 +22,8 @@ const database = vi.hoisted(() => ({
   degradedSearch: false
 }));
 
+const answerFlagId = "11111111-1111-4111-8111-111111111111";
+
 vi.mock("@supabase/supabase-js", () => ({
   createClient: vi.fn(() => ({
     from: (table: string) => {
@@ -57,7 +59,9 @@ vi.mock("@supabase/supabase-js", () => ({
         }
         const stored = {
           ...candidate,
-          id: `flag-${database.flags.length + 1}`,
+          id: database.flags.length === 0
+            ? answerFlagId
+            : "22222222-2222-4222-8222-222222222222",
           status: "open" as const,
           reviewed_at: null,
           created_at: "2026-11-06T08:05:00.000Z"
@@ -153,7 +157,7 @@ describe("Answer Flag API", () => {
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toEqual({
       flag: {
-        id: "flag-1",
+        id: answerFlagId,
         status: "open",
         createdAt: "2026-11-06T08:05:00.000Z"
       }
@@ -282,28 +286,46 @@ describe("Answer Flag API", () => {
     const { PATCH } = await import("./[flagId]/route");
 
     const unauthorized = await PATCH(
-      new Request("http://localhost/api/knowledge/answer-flags/flag-1", { method: "PATCH" }),
-      { params: Promise.resolve({ flagId: "flag-1" }) }
+      new Request(`http://localhost/api/knowledge/answer-flags/${answerFlagId}`, { method: "PATCH" }),
+      { params: Promise.resolve({ flagId: answerFlagId }) }
     );
     expect(unauthorized.status).toBe(401);
 
     const reviewed = await PATCH(
-      new Request("http://localhost/api/knowledge/answer-flags/flag-1", {
+      new Request(`http://localhost/api/knowledge/answer-flags/${answerFlagId}`, {
         method: "PATCH",
         headers: { "x-admin-key": "owner-test-key" }
       }),
-      { params: Promise.resolve({ flagId: "flag-1" }) }
+      { params: Promise.resolve({ flagId: answerFlagId }) }
     );
 
     expect(reviewed.status).toBe(200);
     await expect(reviewed.json()).resolves.toEqual({
       flag: {
-        id: "flag-1",
+        id: answerFlagId,
         status: "reviewed",
         reviewedAt: "2026-11-06T09:00:00.000Z"
       }
     });
     expect(database.flags[0].response_content).toEqual(originalSnapshot);
     expect(database.flags[0].status).toBe("reviewed");
+  });
+
+  it("rejects an invalid Answer Flag identifier before attempting the shared review transition", async () => {
+    const { PATCH } = await import("./[flagId]/route");
+
+    const response = await PATCH(
+      new Request("http://localhost/api/knowledge/answer-flags/not-a-uuid", {
+        method: "PATCH",
+        headers: { "x-admin-key": "owner-test-key" }
+      }),
+      { params: Promise.resolve({ flagId: "not-a-uuid" }) }
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Choose a valid Answer Flag identifier."
+    });
+    expect(database.flagRpcCalls).toHaveLength(0);
   });
 });

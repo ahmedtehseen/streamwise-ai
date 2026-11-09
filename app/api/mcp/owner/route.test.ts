@@ -27,6 +27,21 @@ vi.mock("@supabase/supabase-js", () => ({
   createClient: vi.fn(() => {
     database.calls += 1;
     return {
+      rpc: async (name: string, input: { p_flag_id?: string }) => {
+        if (name !== "review_answer_flag" || database.error) {
+          return { data: null, error: database.error ?? { message: "Unknown RPC." } };
+        }
+        const flag = database.flags.find((candidate) => candidate.id === input.p_flag_id);
+        if (!flag || flag.status !== "open") {
+          return { data: null, error: { message: "ANSWER_FLAG_NOT_OPEN" } };
+        }
+        flag.status = "reviewed";
+        flag.reviewed_at = "2026-11-06T09:00:00.000Z";
+        return {
+          data: { id: flag.id, status: flag.status, reviewed_at: flag.reviewed_at },
+          error: null
+        };
+      },
       from: () => ({
         select: () => ({
           eq: (column: string, value: string) => {
@@ -140,15 +155,15 @@ describe("owner MCP endpoint", () => {
     database.calls = 0;
     database.error = null;
     database.flags = [
-      firstFlag,
+      structuredClone(firstFlag),
       {
-        ...firstFlag,
+        ...structuredClone(firstFlag),
         id: "00000000-0000-4000-8000-000000000002",
         question: "What is Atlas?",
         created_at: "2026-11-06T08:04:00.000Z"
       },
       {
-        ...firstFlag,
+        ...structuredClone(firstFlag),
         id: "22222222-2222-4222-8222-222222222222",
         status: "reviewed",
         reviewed_at: "2026-11-06T09:00:00.000Z",
@@ -205,6 +220,12 @@ describe("owner MCP endpoint", () => {
       id: 3,
       method: "tools/call",
       params: { name: "get_answer_flag", arguments: { flagId: firstFlag.id } }
+    }],
+    ["write invocation", {
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: { name: "review_answer_flag", arguments: { flagId: firstFlag.id } }
     }]
   ])("rejects unauthorized %s before storage", async (_label, body) => {
     const response = await routeFetch("http://localhost/api/mcp/owner", {
@@ -272,18 +293,25 @@ describe("owner MCP endpoint", () => {
     expect(database.calls).toBe(0);
   });
 
-  it("initializes with a real MCP client and discovers only owner read tools", async () => {
+  it("initializes with a real MCP client and discovers only owner Answer Flag tools", async () => {
     const { client, transport } = await ownerClient();
 
     const discovery = await client.listTools();
 
     expect(discovery.tools.map((tool) => tool.name)).toEqual([
       "list_answer_flags",
-      "get_answer_flag"
+      "get_answer_flag",
+      "review_answer_flag"
     ]);
     expect(discovery.tools.map((tool) => tool.annotations)).toEqual([
       expect.objectContaining({ readOnlyHint: true, destructiveHint: false }),
-      expect.objectContaining({ readOnlyHint: true, destructiveHint: false })
+      expect.objectContaining({ readOnlyHint: true, destructiveHint: false }),
+      expect.objectContaining({
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      })
     ]);
     expect(database.calls).toBe(0);
     await transport.close();
@@ -346,6 +374,102 @@ describe("owner MCP endpoint", () => {
     await transport.close();
   });
 
+  it("reviews an open Answer Flag while preserving its captured snapshot", async () => {
+    const provider = vi.fn();
+    vi.stubGlobal("fetch", provider);
+    const captured = structuredClone(firstFlag);
+    const { client, transport } = await ownerClient();
+
+    const reviewed = await client.callTool({
+      name: "review_answer_flag",
+      arguments: { flagId: firstFlag.id }
+    });
+
+    expect(JSON.parse(toolText(reviewed))).toEqual({
+      id: firstFlag.id,
+      status: "reviewed",
+      reviewedAt: "2026-11-06T09:00:00.000Z"
+    });
+
+    const stored = await client.callTool({
+      name: "get_answer_flag",
+      arguments: { flagId: firstFlag.id }
+    });
+    expect(JSON.parse(toolText(stored))).toMatchObject({
+      responseId: captured.response_id,
+      question: captured.question,
+      outcome: captured.outcome,
+      responseContent: captured.response_content,
+      sourceReferences: captured.source_references,
+      respondedAt: captured.responded_at,
+      note: captured.visitor_note,
+      createdAt: captured.created_at,
+      status: "reviewed",
+      reviewedAt: "2026-11-06T09:00:00.000Z"
+    });
+    expect(provider).not.toHaveBeenCalled();
+    await transport.close();
+  });
+
+  it("rechecks owner authorization when an approved review call arrives", async () => {
+    const { client, transport } = await ownerClient();
+    process.env.MCP_OWNER_TOKEN = "replacement-owner-token-with-thirty-two-characters";
+
+    await expect(client.callTool({
+      name: "review_answer_flag",
+      arguments: { flagId: firstFlag.id }
+    })).rejects.toThrow();
+
+    expect(database.flags[0]).toMatchObject({ status: "open", reviewed_at: null });
+    await transport.close();
+  });
+
+  it("returns one success and one stable conflict for concurrent review attempts", async () => {
+    const { client, transport } = await ownerClient();
+
+    const results = await Promise.all([
+      client.callTool({ name: "review_answer_flag", arguments: { flagId: firstFlag.id } }),
+      client.callTool({ name: "review_answer_flag", arguments: { flagId: firstFlag.id } })
+    ]);
+
+    expect(results.filter((result) => result.isError !== true)).toHaveLength(1);
+    const conflict = results.find((result) => result.isError === true);
+    expect(conflict).toBeDefined();
+    expect(toolText(conflict)).toBe("The Answer Flag is missing or has already been reviewed.");
+    expect(database.flags[0]).toMatchObject({
+      status: "reviewed",
+      reviewed_at: "2026-11-06T09:00:00.000Z"
+    });
+    await transport.close();
+  });
+
+  it("shares the atomic review transition with the existing REST route", async () => {
+    process.env.ADMIN_SECRET = "separate-admin-secret";
+    const { client, transport } = await ownerClient();
+
+    const reviewed = await client.callTool({
+      name: "review_answer_flag",
+      arguments: { flagId: firstFlag.id }
+    });
+    expect(reviewed.isError).not.toBe(true);
+
+    const { PATCH } = await import("../../knowledge/answer-flags/[flagId]/route");
+    const restConflict = await PATCH(
+      new Request(`http://localhost/api/knowledge/answer-flags/${firstFlag.id}`, {
+        method: "PATCH",
+        headers: { "x-admin-key": "separate-admin-secret" }
+      }),
+      { params: Promise.resolve({ flagId: firstFlag.id }) }
+    );
+
+    expect(restConflict.status).toBe(409);
+    await expect(restConflict.json()).resolves.toEqual({
+      error: "The Answer Flag is missing or has already been reviewed."
+    });
+    expect(database.flags[0]).toMatchObject({ status: "reviewed" });
+    await transport.close();
+  });
+
   it("rejects invalid status, page bounds, cursors, and identifiers before storage", async () => {
     const { client, transport } = await ownerClient();
     const callsBeforeValidation = database.calls;
@@ -354,7 +478,8 @@ describe("owner MCP endpoint", () => {
       client.callTool({ name: "list_answer_flags", arguments: { status: "all" } }),
       client.callTool({ name: "list_answer_flags", arguments: { limit: 51 } }),
       client.callTool({ name: "list_answer_flags", arguments: { cursor: "not-a-cursor" } }),
-      client.callTool({ name: "get_answer_flag", arguments: { flagId: "not-an-id" } })
+      client.callTool({ name: "get_answer_flag", arguments: { flagId: "not-an-id" } }),
+      client.callTool({ name: "review_answer_flag", arguments: { flagId: "not-an-id" } })
     ]);
 
     expect(invalidInputs.every((result) => result.isError === true)).toBe(true);
@@ -374,15 +499,30 @@ describe("owner MCP endpoint", () => {
     expect(missing.isError).toBe(true);
     expect(toolText(missing)).toBe("The Answer Flag could not be found.");
 
+    const missingReview = await client.callTool({
+      name: "review_answer_flag",
+      arguments: { flagId: "33333333-3333-4333-8333-333333333333" }
+    });
+    expect(missingReview.isError).toBe(true);
+    expect(toolText(missingReview)).toBe("The Answer Flag is missing or has already been reviewed.");
+
     database.error = { message: `database exploded ${ownerToken} admin-secret-must-not-leak service-role-must-not-leak` };
-    const failed = await client.callTool({ name: "list_answer_flags", arguments: {} });
-    const failureText = toolText(failed);
-    expect(failed.isError).toBe(true);
-    expect(failureText).toBe("Answer Flags could not be loaded.");
-    expect(failureText).not.toContain(ownerToken);
-    expect(failureText).not.toContain("admin-secret");
-    expect(failureText).not.toContain("service-role");
-    expect(failureText).not.toContain("database exploded");
+    const failedCalls = await Promise.all([
+      client.callTool({ name: "list_answer_flags", arguments: {} }),
+      client.callTool({ name: "review_answer_flag", arguments: { flagId: firstFlag.id } })
+    ]);
+    const failureTexts = failedCalls.map(toolText);
+    expect(failedCalls.every((result) => result.isError === true)).toBe(true);
+    expect(failureTexts).toEqual([
+      "Answer Flags could not be loaded.",
+      "The Answer Flag is missing or has already been reviewed."
+    ]);
+    for (const failureText of failureTexts) {
+      expect(failureText).not.toContain(ownerToken);
+      expect(failureText).not.toContain("admin-secret");
+      expect(failureText).not.toContain("service-role");
+      expect(failureText).not.toContain("database exploded");
+    }
     await transport.close();
     delete process.env.ADMIN_SECRET;
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
