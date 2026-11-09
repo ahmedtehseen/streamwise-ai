@@ -15,6 +15,7 @@
     "allowance:verify": "node scripts/verify-public-allowance.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@supabase/supabase-js": "^2.118.0",
     "next": "16.4.3",
     "pg": "^8.23.1",
