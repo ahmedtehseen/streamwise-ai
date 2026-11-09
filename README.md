@@ -68,12 +68,13 @@ Configure the following server-side environment variables in `.env.local`:
 | `SUPABASE_URL` | Knowledge | Project URL from Supabase **Project Settings → API**. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Knowledge | Privileged service-role secret from Supabase **Project Settings → API** (server-only). |
 | `ADMIN_SECRET` | Owner operations | High-entropy Portfolio Owner secret required to upload, retry, replace, or delete Project Documents and to review Answer Flags. Production fails closed when it is absent or invalid; leaving it unset is a local-development convenience only. |
+| `MCP_OWNER_TOKEN` | Owner MCP reads | Dedicated high-entropy server-only bearer token (at least 32 non-whitespace characters) for `/api/mcp/owner`. It must be distinct from `ADMIN_SECRET`; the owner MCP endpoint fails closed in every environment when it is absent, malformed, or incorrect. |
 | `ANSWER_FLAG_SECRET` | Optional | Dedicated server-only secret for signing response identities. When omitted, the service-role key is used as the signing key source. |
 | `VISITOR_ID_SECRET` | Public AI routes | Server-only high-entropy secret of at least 32 characters, used to derive rotating one-way Visitor identifiers from Vercel's trusted client-address header. |
 | `SUPABASE_DB_URL` | Optional | Direct Postgres connection URI (optional; used by `scripts/apply-migration.mjs`). |
 
 > [!IMPORTANT]
-> Never commit `.env.local` or expose `GEMINI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_SECRET`, `ANSWER_FLAG_SECRET`, or `VISITOR_ID_SECRET` in client components, public assets, logs, API responses, or `NEXT_PUBLIC_` variables. Only server-side routes use provider credentials. The Portfolio Owner enters `ADMIN_SECRET` at runtime; the application does not embed it in browser assets.
+> Never commit `.env.local` or expose `GEMINI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_SECRET`, `MCP_OWNER_TOKEN`, `ANSWER_FLAG_SECRET`, or `VISITOR_ID_SECRET` in client components, public assets, logs, API responses, URLs, tool arguments, or `NEXT_PUBLIC_` variables. Only server-side routes use provider credentials. The Portfolio Owner enters `ADMIN_SECRET` at runtime; the application does not embed it in browser assets. MCP clients supply `MCP_OWNER_TOKEN` only through the standard `Authorization: Bearer` header.
 
 Streamwise does not implement Visitor accounts, multi-user workspaces, project-scoped permissions, or per-document authorization. The configured free Gemini tier may use submitted data to improve Google products, so this deployment does not claim suitability for private client information.
 

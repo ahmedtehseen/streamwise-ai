@@ -61,8 +61,13 @@ export type AnswerFlag = {
   createdAt: string;
 };
 
+export type AnswerFlagSummary = Pick<
+  AnswerFlag,
+  "id" | "question" | "outcome" | "status" | "respondedAt" | "reviewedAt" | "createdAt"
+>;
+
 export type AnswerFlagServiceError = {
-  code: "invalid_response_identity" | "duplicate_answer_flag" | "answer_flag_not_found" |
+  code: "invalid_response_identity" | "invalid_answer_flag_query" | "duplicate_answer_flag" | "answer_flag_not_found" |
     "answer_flag_conflict" | "answer_flags_unavailable" | "answer_flags_not_configured";
   message: string;
   status: 400 | 404 | 409 | 500 | 502;
@@ -73,6 +78,40 @@ export type AnswerFlagServiceResult<T> =
   | { ok: false; error: AnswerFlagServiceError };
 
 const selectedColumns = "id,response_id,question,outcome,response_content,source_references,responded_at,visitor_note,status,reviewed_at,created_at";
+const summaryColumns = "id,question,outcome,responded_at,status,reviewed_at,created_at";
+
+const answerFlagSummaryRecordSchema = answerFlagRecordSchema.pick({
+  id: true,
+  question: true,
+  outcome: true,
+  responded_at: true,
+  status: true,
+  reviewed_at: true,
+  created_at: true
+});
+
+const answerFlagPageInputSchema = z.object({
+  status: z.enum(["open", "reviewed"]).default("open"),
+  limit: z.number().int().min(1).max(50).default(20),
+  cursor: z.string().min(1).max(2_048).optional()
+});
+
+const answerFlagCursorSchema = z.object({
+  createdAt: z.iso.datetime({ offset: true }),
+  id: z.string().min(1).max(100).regex(/^[A-Za-z0-9-]+$/)
+}).strict();
+
+function encodeAnswerFlagCursor(record: { created_at: string; id: string }) {
+  return Buffer.from(JSON.stringify({ createdAt: record.created_at, id: record.id })).toString("base64url");
+}
+
+function decodeAnswerFlagCursor(cursor: string) {
+  try {
+    return answerFlagCursorSchema.parse(JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")));
+  } catch {
+    return null;
+  }
+}
 
 function publicAnswerFlag(record: z.infer<typeof answerFlagRecordSchema>): AnswerFlag {
   return {
@@ -90,12 +129,12 @@ function publicAnswerFlag(record: z.infer<typeof answerFlagRecordSchema>): Answe
   };
 }
 
-function notConfigured(error: unknown): AnswerFlagServiceResult<never> {
+function notConfigured(_error: unknown): AnswerFlagServiceResult<never> {
   return {
     ok: false,
     error: {
       code: "answer_flags_not_configured",
-      message: error instanceof Error ? error.message : "Answer Flags are not configured.",
+      message: "Answer Flags are not configured.",
       status: 500
     }
   };
@@ -174,14 +213,82 @@ export async function listAnswerFlags(): Promise<AnswerFlagServiceResult<AnswerF
   }
 }
 
+export async function listAnswerFlagsPage(input: {
+  status?: "open" | "reviewed";
+  limit?: number;
+  cursor?: string;
+} = {}): Promise<AnswerFlagServiceResult<{ flags: AnswerFlagSummary[]; nextCursor: string | null }>> {
+  const parsedInput = answerFlagPageInputSchema.safeParse(input);
+  const cursor = parsedInput.success && parsedInput.data.cursor
+    ? decodeAnswerFlagCursor(parsedInput.data.cursor)
+    : null;
+  if (!parsedInput.success || (parsedInput.data.cursor && !cursor)) {
+    return {
+      ok: false,
+      error: { code: "invalid_answer_flag_query", message: "Choose a valid Answer Flag page.", status: 400 }
+    };
+  }
+  try {
+    const configuration = knowledgeDatabaseConfiguration();
+    const client = createKnowledgeClient(configuration.supabaseUrl, configuration.serviceRoleKey);
+    const { status, limit } = parsedInput.data;
+    let query = client
+      .from("answer_flags")
+      .select(summaryColumns)
+      .eq("status", status)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false });
+    if (cursor) {
+      query = query.or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`);
+    }
+    const { data, error } = await query.limit(limit + 1);
+    const parsed = z.array(answerFlagSummaryRecordSchema).safeParse(data);
+    if (error || !parsed.success) {
+      return {
+        ok: false,
+        error: { code: "answer_flags_unavailable", message: "Answer Flags could not be loaded.", status: 502 }
+      };
+    }
+    const page = parsed.data.slice(0, limit);
+    return {
+      ok: true,
+      value: {
+        flags: page.map((record) => ({
+          id: record.id,
+          question: record.question,
+          outcome: record.outcome,
+          status: record.status,
+          respondedAt: record.responded_at,
+          reviewedAt: record.reviewed_at,
+          createdAt: record.created_at
+        })),
+        nextCursor: parsed.data.length > limit ? encodeAnswerFlagCursor(page[page.length - 1]) : null
+      }
+    };
+  } catch (error) {
+    return notConfigured(error);
+  }
+}
+
 export async function getAnswerFlag(input: { flagId: string }): Promise<AnswerFlagServiceResult<AnswerFlag>> {
+  const parsedFlagId = z.string().uuid().safeParse(input.flagId);
+  if (!parsedFlagId.success) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_answer_flag_query",
+        message: "Choose a valid Answer Flag identifier.",
+        status: 400
+      }
+    };
+  }
   try {
     const configuration = knowledgeDatabaseConfiguration();
     const client = createKnowledgeClient(configuration.supabaseUrl, configuration.serviceRoleKey);
     const { data, error } = await client
       .from("answer_flags")
       .select(selectedColumns)
-      .eq("id", input.flagId)
+      .eq("id", parsedFlagId.data)
       .maybeSingle();
     if (error) {
       return {
