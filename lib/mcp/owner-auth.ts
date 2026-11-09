@@ -21,4 +21,3 @@ export function verifyMcpOwnerAccess(request: Request): boolean {
 
   return timingSafeEqual(ownerTokenDigest(match[1]), ownerTokenDigest(configuredToken));
 }
-

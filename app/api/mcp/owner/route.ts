@@ -24,4 +24,3 @@ async function handleOwnerMcpRequest(request: Request) {
 export const POST = handleOwnerMcpRequest;
 export const GET = handleOwnerMcpRequest;
 export const DELETE = handleOwnerMcpRequest;
-
