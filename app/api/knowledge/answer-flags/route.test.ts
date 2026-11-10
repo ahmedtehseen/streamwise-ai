@@ -19,7 +19,8 @@ const database = vi.hoisted(() => ({
   flags: [] as StoredFlag[],
   flagRpcCalls: [] as Array<{ name: string; parameters: Record<string, unknown> }>,
   questionOutcome: "answered" as "answered" | "insufficient_evidence",
-  degradedSearch: false
+  degradedSearch: false,
+  reviewResult: null as { data: unknown; error: { message: string } | null } | null
 }));
 
 const answerFlagId = "11111111-1111-4111-8111-111111111111";
@@ -70,6 +71,7 @@ vi.mock("@supabase/supabase-js", () => ({
         return { data: stored, error: null };
       }
       if (name === "review_answer_flag") {
+        if (database.reviewResult) return database.reviewResult;
         const flag = database.flags.find((item) => item.id === parameters.p_flag_id);
         if (!flag || flag.status !== "open") return { data: null, error: { message: "ANSWER_FLAG_NOT_OPEN" } };
         flag.status = "reviewed";
@@ -93,6 +95,7 @@ describe("Answer Flag API", () => {
     database.flagRpcCalls = [];
     database.questionOutcome = "answered";
     database.degradedSearch = false;
+    database.reviewResult = null;
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test-key";
     process.env.ADMIN_SECRET = "owner-test-key";
@@ -309,6 +312,60 @@ describe("Answer Flag API", () => {
     });
     expect(database.flags[0].response_content).toEqual(originalSnapshot);
     expect(database.flags[0].status).toBe("reviewed");
+  });
+
+  it.each([
+    ["RPC error", { data: null, error: { message: "private database detail" } }],
+    ["missing result", { data: null, error: null }],
+    ["invalid result", { data: { id: answerFlagId }, error: null }]
+  ])("preserves the REST review conflict status for a storage %s", async (_caseName, result) => {
+    database.reviewResult = result;
+    const { PATCH } = await import("./[flagId]/route");
+
+    const response = await PATCH(
+      new Request(`http://localhost/api/knowledge/answer-flags/${answerFlagId}`, {
+        method: "PATCH",
+        headers: { "x-admin-key": "owner-test-key" }
+      }),
+      { params: Promise.resolve({ flagId: answerFlagId }) }
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "The Answer Flag could not be reviewed." });
+  });
+
+  it("returns a conflict when the Answer Flag is missing or already reviewed", async () => {
+    const { PATCH } = await import("./[flagId]/route");
+
+    const response = await PATCH(
+      new Request(`http://localhost/api/knowledge/answer-flags/${answerFlagId}`, {
+        method: "PATCH",
+        headers: { "x-admin-key": "owner-test-key" }
+      }),
+      { params: Promise.resolve({ flagId: answerFlagId }) }
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "The Answer Flag is missing or has already been reviewed."
+    });
+  });
+
+  it("returns a configuration failure when Answer Flag storage is not configured", async () => {
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const { PATCH } = await import("./[flagId]/route");
+
+    const response = await PATCH(
+      new Request(`http://localhost/api/knowledge/answer-flags/${answerFlagId}`, {
+        method: "PATCH",
+        headers: { "x-admin-key": "owner-test-key" }
+      }),
+      { params: Promise.resolve({ flagId: answerFlagId }) }
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: "Answer Flags are not configured." });
+    expect(database.flagRpcCalls).toHaveLength(0);
   });
 
   it("rejects an invalid Answer Flag identifier before attempting the shared review transition", async () => {
