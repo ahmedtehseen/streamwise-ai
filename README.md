@@ -78,7 +78,30 @@ Configure the following server-side environment variables in `.env.local`:
 
 Streamwise does not implement Visitor accounts, multi-user workspaces, project-scoped permissions, or per-document authorization. The configured free Gemini tier may use submitted data to improve Google products, so this deployment does not claim suitability for private client information.
 
-### Codex owner MCP configuration
+### Week 7 MCP access
+
+Streamwise exposes four tools over stateless Streamable HTTP, using the same Portfolio Assistant and Answer Flag application services as the existing interface and API.
+
+| Endpoint | Tool | Scope |
+| --- | --- | --- |
+| `/api/mcp` | `ask_portfolio` | Public question of 1–500 trimmed characters. Returns a Grounded Answer with Source References, Insufficient Evidence, or a sanitized error. |
+| `/api/mcp/owner` | `list_answer_flags` | Owner-only summaries filtered by `open` or `reviewed`, with a cursor and a page limit of 1–50 (default 20). |
+| `/api/mcp/owner` | `get_answer_flag` | Owner-only inspection of one exact `flagId` UUID and its immutable response snapshot. |
+| `/api/mcp/owner` | `review_answer_flag` | Owner-only transition of one exact open `flagId` UUID to reviewed after explicit Portfolio Owner approval in Codex. |
+
+`ask_portfolio` consumes the same durable Visitor/global public allowance as the four web AI actions. It reuses grounding, Source References, Insufficient Evidence, degraded retrieval, and sanitized limit/reset outcomes. Production must supply the trusted Vercel client-address header and `VISITOR_ID_SECRET` for public calls. Missing trusted Visitor identity fails closed. Owner tools consume no public action and invoke no model.
+
+Codex is the supported Week 7 client. Add the public endpoint to the same trusted Codex configuration as the owner example below, replacing the example origin with the deployed HTTPS origin.
+
+```toml
+[mcp_servers.streamwise_public]
+url = "https://streamwise.example/api/mcp"
+enabled_tools = ["ask_portfolio"]
+```
+
+Owner discovery and initialization require the dedicated `MCP_OWNER_TOKEN` bearer credential before any tool runs. `ADMIN_SECRET` continues to authorize existing owner interface/API operations. The owner MCP tools expose only Answer Flag listing, inspection, and review. Week 7 defers OAuth, additional client compatibility, document administration through MCP, autonomous workflows, and Week 8 evaluation and observability.
+
+#### Codex owner MCP configuration
 
 Codex is the supported Week 7 owner MCP client. Export the same dedicated token configured as `MCP_OWNER_TOKEN` on the Streamwise deployment into the environment that launches Codex, then add the following to `~/.codex/config.toml` (or a trusted project's `.codex/config.toml`). Replace the example origin with the HTTPS Streamwise deployment:
 
@@ -195,6 +218,8 @@ The automated test suite verifies:
 
 The canonical Week 6 specification and tickets live in GitHub: [#9](https://github.com/ahmedtehseen/streamwise-ai/issues/9), with implementation tickets [#10](https://github.com/ahmedtehseen/streamwise-ai/issues/10) through [#15](https://github.com/ahmedtehseen/streamwise-ai/issues/15). Follow [the complete Week 6 real-service smoke procedure](docs/real-service-smoke.md) against the configured Supabase project and Gemini API. It covers shared Visitor/global allowance outcomes, primary generation and compatible fallback, visibly degraded retrieval, Grounded Answers and Insufficient Evidence, Answer Flag submission and owner review, failed replacement isolation, successful atomic activation, cascading cleanup, and removal of all temporary smoke data. The latest recorded execution is [the 2026-11-06 Week 6 smoke record](docs/smoke/2026-11-06-week6.md).
 
+For Week 7, follow [the HTTPS and Codex MCP smoke procedure](docs/week7-mcp-smoke.md). The [2026-11-10 Week 7 record](docs/smoke/2026-11-10-week7.md) separates deterministic gate results from blocked live observations.
+
 The allowance concurrency check is destructive to `public_allowance_buckets` and therefore requires a separately configured isolated database. Never run it against production:
 
 ```sh
@@ -213,6 +238,7 @@ npm run allowance:verify
 - **Week 4 · Multimodal Screenshot Intake**: Direct screenshot upload and paste (PNG/JPEG/WebP up to 5 MB), vision analysis, and conversion to structured task specifications.
 - **Week 5 · Portfolio Assistant & Advanced RAG**: Shared Knowledge Base with Supabase Postgres and `pgvector`, multi-format Project Document ingestion, hybrid search with Reciprocal Rank Fusion, deterministic keyword extraction, Portfolio Owner protection, and source-grounded answers.
 - **Week 6 · Trustworthy public Streamwise**: Shared public allowances, visibly degraded full-text retrieval, reviewable Answer Flags, and safe Document Replacement.
+- **Week 7 · Bounded MCP access**: Public Portfolio Assistant questions and credential-protected Answer Flag inspection/review through Codex, with explicit approval before review. Live acceptance status is tracked in the Week 7 smoke record.
 
 ---
 
