@@ -424,6 +424,51 @@ describe("owner MCP endpoint", () => {
     await transport.close();
   });
 
+  it("returns stable structured error codes for invalid input, missing flags, conflicts, and unavailable storage", async () => {
+    const { client, transport } = await ownerClient();
+    const invalid = await client.callTool({ name: "get_answer_flag", arguments: { flagId: "private-invalid-value" } });
+    const invalidPage = await client.callTool({ name: "list_answer_flags", arguments: { cursor: "private-invalid-cursor" } });
+    const missing = await client.callTool({
+      name: "get_answer_flag", arguments: { flagId: "33333333-3333-4333-8333-333333333333" }
+    });
+    const conflict = await client.callTool({
+      name: "review_answer_flag", arguments: { flagId: "22222222-2222-4222-8222-222222222222" }
+    });
+    database.error = { message: `private database detail ${ownerToken}` };
+    const unavailable = await client.callTool({ name: "review_answer_flag", arguments: { flagId: firstFlag.id } });
+
+    for (const [result, code, retryable] of [
+      [invalid, "invalid_answer_flag_query", false],
+      [invalidPage, "invalid_answer_flag_query", false],
+      [missing, "answer_flag_not_found", false],
+      [conflict, "answer_flag_conflict", false],
+      [unavailable, "answer_flags_unavailable", true]
+    ] as const) {
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toMatchObject({ ok: false, outcome: "error", error: { code, retryable } });
+      expect(JSON.parse(toolText(result))).toEqual(result.structuredContent);
+      expect(JSON.stringify(result)).not.toContain("private");
+      expect(JSON.stringify(result)).not.toContain(ownerToken);
+    }
+    await transport.close();
+  });
+
+  it("returns sanitized structured failures when owner storage is not configured", async () => {
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const { client, transport } = await ownerClient();
+
+    const result = await client.callTool({ name: "list_answer_flags", arguments: {} });
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({
+      ok: false, outcome: "error", error: {
+        code: "answer_flags_not_configured", message: "Answer Flags are not configured.", retryable: true
+      }
+    });
+    expect(JSON.parse(toolText(result))).toEqual(result.structuredContent);
+    await transport.close();
+  });
+
   it("returns one success and one stable conflict for concurrent review attempts", async () => {
     const { client, transport } = await ownerClient();
 
@@ -435,7 +480,7 @@ describe("owner MCP endpoint", () => {
     expect(results.filter((result) => result.isError !== true)).toHaveLength(1);
     const conflict = results.find((result) => result.isError === true);
     expect(conflict).toBeDefined();
-    expect(toolText(conflict)).toBe("The Answer Flag is missing or has already been reviewed.");
+    expect(JSON.parse(toolText(conflict)).error.message).toBe("The Answer Flag is missing or has already been reviewed.");
     expect(database.flags[0]).toMatchObject({
       status: "reviewed",
       reviewed_at: "2026-11-06T09:00:00.000Z"
@@ -477,12 +522,19 @@ describe("owner MCP endpoint", () => {
     const invalidInputs = await Promise.all([
       client.callTool({ name: "list_answer_flags", arguments: { status: "all" } }),
       client.callTool({ name: "list_answer_flags", arguments: { limit: 51 } }),
+      client.callTool({ name: "list_answer_flags", arguments: { unexpected: "private argument" } }),
       client.callTool({ name: "list_answer_flags", arguments: { cursor: "not-a-cursor" } }),
       client.callTool({ name: "get_answer_flag", arguments: { flagId: "not-an-id" } }),
-      client.callTool({ name: "review_answer_flag", arguments: { flagId: "not-an-id" } })
+      client.callTool({ name: "review_answer_flag", arguments: { flagId: "not-an-id" } }),
+      client.callTool({ name: "unknown_private_tool", arguments: {} })
     ]);
 
     expect(invalidInputs.every((result) => result.isError === true)).toBe(true);
+    for (const result of invalidInputs) {
+      expect(result.structuredContent).toMatchObject({
+        ok: false, outcome: "error", error: { code: "invalid_answer_flag_query", retryable: false }
+      });
+    }
     expect(database.calls).toBe(callsBeforeValidation);
     await transport.close();
   });
@@ -497,25 +549,30 @@ describe("owner MCP endpoint", () => {
       arguments: { flagId: "33333333-3333-4333-8333-333333333333" }
     });
     expect(missing.isError).toBe(true);
-    expect(toolText(missing)).toBe("The Answer Flag could not be found.");
+    expect(JSON.parse(toolText(missing)).error.message).toBe("The Answer Flag could not be found.");
 
     const missingReview = await client.callTool({
       name: "review_answer_flag",
       arguments: { flagId: "33333333-3333-4333-8333-333333333333" }
     });
     expect(missingReview.isError).toBe(true);
-    expect(toolText(missingReview)).toBe("The Answer Flag is missing or has already been reviewed.");
+    expect(JSON.parse(toolText(missingReview)).error.message).toBe("The Answer Flag is missing or has already been reviewed.");
 
     database.error = { message: `database exploded ${ownerToken} admin-secret-must-not-leak service-role-must-not-leak` };
     const failedCalls = await Promise.all([
       client.callTool({ name: "list_answer_flags", arguments: {} }),
       client.callTool({ name: "review_answer_flag", arguments: { flagId: firstFlag.id } })
     ]);
-    const failureTexts = failedCalls.map(toolText);
+    for (const result of failedCalls) {
+      expect(result.structuredContent).toMatchObject({
+        ok: false, outcome: "error", error: { code: "answer_flags_unavailable", retryable: true }
+      });
+    }
+    const failureTexts = failedCalls.map((result) => JSON.parse(toolText(result)).error.message);
     expect(failedCalls.every((result) => result.isError === true)).toBe(true);
     expect(failureTexts).toEqual([
       "Answer Flags could not be loaded.",
-      "The Answer Flag is missing or has already been reviewed."
+      "The Answer Flag could not be reviewed."
     ]);
     for (const failureText of failureTexts) {
       expect(failureText).not.toContain(ownerToken);

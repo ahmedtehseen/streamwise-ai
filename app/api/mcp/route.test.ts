@@ -162,7 +162,7 @@ describe("public Portfolio Assistant MCP endpoint", () => {
     expect(database.admissionCalls).toBe(0);
   });
 
-  it("consumes exactly one public action for a valid question when the Knowledge Base is empty", async () => {
+  it("preserves an empty Knowledge Base failure without consuming a public action", async () => {
     database.readyDocumentCount = 0;
     const client = await connect();
     const result = await client.callTool({
@@ -181,7 +181,7 @@ describe("public Portfolio Assistant MCP endpoint", () => {
         retryable: false
       }
     });
-    expect(database.admissionCalls).toBe(1);
+    expect(database.admissionCalls).toBe(0);
   });
 
   it("returns Insufficient Evidence as a successful machine-distinguishable outcome", async () => {
@@ -296,7 +296,7 @@ describe("public Portfolio Assistant MCP endpoint", () => {
     expect(database.admissionCalls).toBe(1);
   });
 
-  it("sanitizes database failures after consuming exactly one public action", async () => {
+  it("sanitizes Knowledge Base check failures without consuming a public action", async () => {
     database.countError = { message: "password=secret internal database host" };
     const client = await connect();
     const result = await client.callTool({
@@ -315,7 +315,7 @@ describe("public Portfolio Assistant MCP endpoint", () => {
       }
     });
     expect(JSON.stringify(result)).not.toContain("password=secret");
-    expect(database.admissionCalls).toBe(1);
+    expect(database.admissionCalls).toBe(0);
   });
 
   it("fails closed with a sanitized code when allowance storage is unavailable", async () => {
