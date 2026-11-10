@@ -10,6 +10,8 @@ Run after the deterministic gates below. Track acceptance for issue #22 separate
 4. Use the public and owner Codex configuration examples in the README. Keep `approvals_reviewer = "user"`, `default_tools_approval_mode = "prompt"`, and the per-tool `review_answer_flag` prompt override. Restart Codex with that environment and trusted configuration. Do not use unattended approval, saved blanket approval, or a client that suppresses the prompt.
 5. Choose a unique run ID such as `w7-smoke-20261110-1100`. Track only the temporary Project Document, Answer Flag UUIDs, and response identifiers created by this run in private notes. Capture pre-run counts and existing rows so cleanup preserves other data.
 
+Before creating test data, run the read-only `supabase/verify_knowledge_schema.sql` against the actual deployment database and require every boolean to be true. Local migration-file validation alone cannot establish the deployed schema. Apply only identified missing migrations to an existing database, then rerun the schema check. The bootstrap migration runner deliberately refuses existing application tables.
+
 Keep tokens, provider keys, service-role secrets, Authorization headers, raw Visitor addresses, signed response identities, and private notes out of committed records, terminal tracing, screenshots, URLs, tool arguments, and public assets. Enter owner credentials only into the intended private credential controls. Redact approval screenshots without hiding the tool name or exact Answer Flag UUID. Review captured transcripts before retaining them.
 
 ## 2. Public HTTPS connection and evidence
