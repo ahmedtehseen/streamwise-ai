@@ -334,7 +334,7 @@ export async function reviewAnswerFlag(input: {
     const client = createKnowledgeClient(configuration.supabaseUrl, configuration.serviceRoleKey);
     const { data, error } = await client.rpc("review_answer_flag", { p_flag_id: parsedFlagId.data });
     const parsed = reviewedFlagSchema.safeParse(data);
-    if (error || !parsed.success) {
+    if (error?.message === "ANSWER_FLAG_NOT_OPEN") {
       return {
         ok: false,
         error: {
@@ -342,6 +342,12 @@ export async function reviewAnswerFlag(input: {
           message: "The Answer Flag is missing or has already been reviewed.",
           status: 409
         }
+      };
+    }
+    if (error || !parsed.success) {
+      return {
+        ok: false,
+        error: { code: "answer_flags_unavailable", message: "The Answer Flag could not be reviewed.", status: 502 }
       };
     }
     return {

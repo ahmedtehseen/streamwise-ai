@@ -30,7 +30,7 @@ The application features three integrated modes. Streamwise is a single-owner pu
    - **Reviewable Answer Flags**: Gives every Grounded Answer and Insufficient Evidence response a signed identity so Visitors can submit one anonymous, optional-note flag for private owner review without changing evidence or behavior automatically.
    - **Safe Document Replacement**: Stages one candidate revision while the current ready Project Document remains searchable, then atomically activates the candidate and removes superseded evidence only after successful processing.
 
-All four public AI actions share one durable allowance: 3 actions per Visitor per minute, 15 globally per minute, 10 per Visitor per Pacific day, and 50 globally per Pacific day. Limit responses identify the reset time in Pacific time. A Chat message, Spec generation, task-draft creation, or Portfolio Assistant question consumes one action; navigation, Answer Flags, and owner-only indexing do not. Malformed requests are rejected before admission, and an internal model fallback does not consume another action.
+All four public AI actions share one durable allowance: 3 actions per Visitor per minute, 15 globally per minute, 10 per Visitor per Pacific day, and 50 globally per Pacific day. Limit responses identify the reset time in Pacific time. A Chat message, Spec generation, task-draft creation, or Portfolio Assistant question consumes one action; navigation, Answer Flags, and owner-only indexing do not. Malformed requests are rejected before admission, and an internal model fallback does not consume another action. Portfolio Assistant configuration checks and checks for ready Project Documents also run before admission.
 
 Generation uses `gemini-3.5-flash-lite` first. Confirmed daily-quota exhaustion permits one compatible `gemini-3.1-flash-lite` attempt within the admitted action; short-window throttling receives one bounded retry. A partial Chat stream is never restarted, and the same output validation applies to either model. If both models exhaust daily quota, Streamwise returns a stable unavailable response without provider details.
 
@@ -100,6 +100,32 @@ enabled_tools = ["ask_portfolio"]
 ```
 
 Owner discovery and initialization require the dedicated `MCP_OWNER_TOKEN` bearer credential before any tool runs. `ADMIN_SECRET` continues to authorize existing owner interface/API operations. The owner MCP tools expose only Answer Flag listing, inspection, and review. Week 7 defers OAuth, additional client compatibility, document administration through MCP, autonomous workflows, and Week 8 evaluation and observability.
+
+#### Owner tool failures
+
+Owner tool failures return `isError = true`. Both `structuredContent` and the first text content item carry the same JSON payload. Clients can branch on `error.code` and `error.retryable`.
+
+```json
+{
+  "ok": false,
+  "outcome": "error",
+  "error": {
+    "code": "answer_flag_not_found",
+    "message": "The Answer Flag could not be found.",
+    "retryable": false
+  }
+}
+```
+
+| Code | Meaning | Retryable |
+| --- | --- | --- |
+| `invalid_answer_flag_query` | Invalid tool arguments, identifier, page, cursor, or tool name | No |
+| `answer_flag_not_found` | The requested snapshot is absent | No |
+| `answer_flag_conflict` | The atomic review found no open flag, including missing or already-reviewed flags | No |
+| `answer_flags_unavailable` | Answer Flag storage could not complete the operation | Yes |
+| `answer_flags_not_configured` | Answer Flag server configuration is unavailable | Yes |
+
+Schema failures use a fixed message without echoing rejected values. Service messages omit database/provider detail and credentials. HTTP 401 still rejects unauthorized requests before MCP initialization, discovery, or calls.
 
 #### Codex owner MCP configuration
 

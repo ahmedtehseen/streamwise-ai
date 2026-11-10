@@ -79,18 +79,6 @@ export async function askPortfolioAssistant(input: {
   question: string;
   request: Request;
 }): Promise<PortfolioAssistantResult> {
-  const allowanceResponse = await admitPublicAction(input.request);
-  if (allowanceResponse) {
-    const error = await allowanceResponse.json() as PortfolioAssistantFailure;
-    const retryAfter = allowanceResponse.headers.get("Retry-After");
-    return {
-      ok: false,
-      error,
-      status: allowanceResponse.status,
-      ...(retryAfter ? { headers: { "Retry-After": retryAfter } } : {})
-    };
-  }
-
   let configuration: ReturnType<typeof knowledgeConfiguration>;
   try {
     configuration = knowledgeConfiguration();
@@ -129,6 +117,18 @@ export async function askPortfolioAssistant(input: {
       ok: false,
       error: { error: "Index at least one Project Document before asking a question." },
       status: 409
+    };
+  }
+
+  const allowanceResponse = await admitPublicAction(input.request);
+  if (allowanceResponse) {
+    const error = await allowanceResponse.json() as PortfolioAssistantFailure;
+    const retryAfter = allowanceResponse.headers.get("Retry-After");
+    return {
+      ok: false,
+      error,
+      status: allowanceResponse.status,
+      ...(retryAfter ? { headers: { "Retry-After": retryAfter } } : {})
     };
   }
 
