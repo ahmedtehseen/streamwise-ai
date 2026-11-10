@@ -13,7 +13,7 @@ export async function PATCH(
   const { flagId } = await context.params;
   if (!flagId) return Response.json({ error: "Choose an Answer Flag to review." }, { status: 400 });
 
-  const result = await reviewAnswerFlag({ flagId });
+  const result = await reviewAnswerFlag({ flagId }, { identifierValidation: "nonempty" });
   if (!result.ok) {
     // REST review failures historically return a conflict, including storage failures.
     const status = result.error.code === "answer_flags_unavailable" ? 409 : result.error.status;

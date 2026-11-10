@@ -317,8 +317,10 @@ export async function getAnswerFlag(input: { flagId: string }): Promise<AnswerFl
 
 export async function reviewAnswerFlag(input: {
   flagId: string;
-}): Promise<AnswerFlagServiceResult<{ id: string; status: "reviewed"; reviewedAt: string }>> {
-  const parsedFlagId = z.string().uuid().safeParse(input.flagId);
+}, options: { identifierValidation?: "uuid" | "nonempty" } = {}): Promise<AnswerFlagServiceResult<{ id: string; status: "reviewed"; reviewedAt: string }>> {
+  // The existing REST review contract lets storage reject malformed non-empty IDs.
+  const identifierSchema = options.identifierValidation === "nonempty" ? z.string().min(1) : z.string().uuid();
+  const parsedFlagId = identifierSchema.safeParse(input.flagId);
   if (!parsedFlagId.success) {
     return {
       ok: false,

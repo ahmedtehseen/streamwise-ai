@@ -368,21 +368,24 @@ describe("Answer Flag API", () => {
     expect(database.flagRpcCalls).toHaveLength(0);
   });
 
-  it("rejects an invalid Answer Flag identifier before attempting the shared review transition", async () => {
+  it.each(["not-a-uuid", " "])("preserves the REST conflict response for malformed non-empty identifier %j", async (flagId) => {
+    database.reviewResult = { data: null, error: { message: "invalid input syntax for type uuid" } };
     const { PATCH } = await import("./[flagId]/route");
 
     const response = await PATCH(
-      new Request("http://localhost/api/knowledge/answer-flags/not-a-uuid", {
+      new Request(`http://localhost/api/knowledge/answer-flags/${encodeURIComponent(flagId)}`, {
         method: "PATCH",
         headers: { "x-admin-key": "owner-test-key" }
       }),
-      { params: Promise.resolve({ flagId: "not-a-uuid" }) }
+      { params: Promise.resolve({ flagId }) }
     );
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
-      error: "Choose a valid Answer Flag identifier."
+      error: "The Answer Flag could not be reviewed."
     });
-    expect(database.flagRpcCalls).toHaveLength(0);
+    expect(database.flagRpcCalls).toEqual([
+      { name: "review_answer_flag", parameters: { p_flag_id: flagId } }
+    ]);
   });
 });
