@@ -453,22 +453,13 @@ export default function KnowledgePanel() {
 
         {questionError && <p className="knowledge-error" role="alert">{questionError}</p>}
 
-        <div className="knowledge-prompts" style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
+        <div className="knowledge-prompts">
           {samplePrompts.map((prompt) => (
             <button
               key={prompt}
               type="button"
-              className="prompt-chip"
+              className="prompt-chip knowledge-prompt-chip"
               onClick={() => setQuestion(prompt)}
-              style={{
-                fontSize: "0.8rem",
-                padding: "0.25rem 0.6rem",
-                borderRadius: "1rem",
-                border: "1px solid rgba(255, 255, 255, 0.15)",
-                background: "rgba(255, 255, 255, 0.05)",
-                color: "inherit",
-                cursor: "pointer"
-              }}
             >
               {prompt}
             </button>
@@ -488,30 +479,8 @@ export default function KnowledgePanel() {
             className="knowledge-asking-status"
             role="status"
             aria-live="polite"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.65rem",
-              marginTop: "1.5rem",
-              padding: "0.75rem 1rem",
-              borderRadius: "0.625rem",
-              background: "#1d2024",
-              border: "1px solid #40464f",
-              color: "#c4c7c5",
-              fontSize: "0.875rem"
-            }}
           >
-            <span
-              style={{
-                display: "inline-block",
-                width: "0.85rem",
-                height: "0.85rem",
-                borderRadius: "50%",
-                border: "2px solid #5a5f67",
-                borderTopColor: "#a8c7fa",
-                animation: "spin 0.8s linear infinite"
-              }}
-            />
+            <span className="knowledge-spinner" />
             <span>{askingStep}</span>
           </div>
         )}
@@ -582,8 +551,8 @@ export default function KnowledgePanel() {
               <button ref={drawerCloseRef} className="document-drawer-close" type="button" onClick={closeDocumentDrawer} aria-label="Close project documents">×</button>
             </header>
             <div className="document-drawer-content">
-              <div style={{ marginBottom: "1rem", padding: "0.5rem", borderRadius: "0.375rem", border: "1px solid rgba(255, 255, 255, 0.15)" }}>
-                <label htmlFor="admin-key-input" style={{ fontSize: "0.75rem", display: "block", marginBottom: "0.25rem", opacity: 0.8 }}>Portfolio Owner secret</label>
+              <div className="admin-key-field">
+                <label htmlFor="admin-key-input">Portfolio Owner secret</label>
                 <input
                   id="admin-key-input"
                   type="password"
@@ -593,7 +562,6 @@ export default function KnowledgePanel() {
                     setAdminKey(e.target.value);
                     sessionStorage.setItem("portfolio_admin_key", e.target.value);
                   }}
-                  style={{ width: "100%", padding: "0.35rem 0.5rem", fontSize: "0.825rem", background: "transparent", border: "1px solid rgba(255, 255, 255, 0.2)", borderRadius: "0.25rem", color: "inherit" }}
                 />
               </div>
 

@@ -78,7 +78,7 @@ function MarkdownMessage({ content }: { content: string }) {
 function UserImageMessage({ name, previewUrl, content }: { name: string; previewUrl?: string; content: string }) {
   return (
     <div className="user-image-message">
-      {previewUrl ? <div className="user-image-preview"><Image src={previewUrl} alt={`Submitted screenshot ${name}`} fill sizes="(max-width: 700px) 80vw, 420px" unoptimized /></div> : <div className="user-image-fallback"><span aria-hidden="true">▧</span><span>Screenshot: {name}</span></div>}
+      {previewUrl ? <div className="user-image-preview"><Image src={previewUrl} alt={`Submitted image ${name}`} fill sizes="(max-width: 700px) 80vw, 420px" unoptimized /></div> : <div className="user-image-fallback"><span aria-hidden="true">▧</span><span>Image: {name}. Reattach it to discuss it after reloading.</span></div>}
       {content && <MarkdownMessage content={content} />}
     </div>
   );
@@ -105,7 +105,7 @@ function migrateStoredConversations(conversations: Conversation[]) {
     ...conversation,
     messages: conversation.messages.map((message) =>
       message.role === "assistant" && message.content.includes("This model is currently experiencing high demand")
-        ? { ...message, content: "Sorry, Gemini is temporarily busy. Please try again in a moment." }
+        ? { ...message, content: "Sorry, Streamwise is temporarily busy. Please try again in a moment." }
         : message
     )
   }));
@@ -159,6 +159,7 @@ export default function Home() {
   const sidebarRef = useRef<HTMLElement>(null);
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const messageImageUrlsRef = useRef(messageImageUrls);
+  const messageImagesRef = useRef<Record<string, File>>({});
   const imagePreviewUrl = useObjectUrl(selectedImage);
   const activeConversation = useMemo(() => conversations.find((c) => c.id === activeConversationId) ?? null, [activeConversationId, conversations]);
   const messages = activeConversation?.messages ?? [];
@@ -198,14 +199,13 @@ export default function Home() {
     if (!file) return clearSelectedImage();
     if (!isSupportedImageType(file.type)) {
       clearSelectedImage();
-      return setAttachmentError("Use a PNG, JPEG, or WebP screenshot.");
+      return setAttachmentError("Use a PNG, JPEG, or WebP image.");
     }
-    if (file.size > MAX_IMAGE_BYTES) {
+    if (file.size === 0 || file.size > MAX_IMAGE_BYTES) {
       clearSelectedImage();
-      return setAttachmentError("Keep the screenshot under 5 MB.");
+      return setAttachmentError("Choose a nonempty image under 5 MB.");
     }
     setSelectedImage(file);
-    setMode("spec");
   }
 
   function pasteImage(event: ReactClipboardEvent<HTMLTextAreaElement>) {
@@ -219,7 +219,7 @@ export default function Home() {
 
   function selectMode(nextMode: ApplicationMode) {
     if (isLoading) return;
-    if (nextMode !== "spec" && selectedImage) {
+    if (nextMode === "knowledge" && selectedImage) {
       const shouldDiscard = window.confirm("Switch modes and remove the attached screenshot?");
       if (!shouldDiscard) return;
       clearSelectedImage();
@@ -271,6 +271,7 @@ export default function Home() {
     setMessageImageUrls((current) => {
       const next = { ...current };
       messageIds.forEach((messageId) => {
+        delete messageImagesRef.current[messageId];
         if (!next[messageId]) return;
         URL.revokeObjectURL(next[messageId]);
         delete next[messageId];
@@ -292,9 +293,10 @@ export default function Home() {
     event.preventDefault();
     if (mode === "spec") return createTaskSpec();
     const text = input.trim();
-    if (!text || isLoading) return;
+    const image = selectedImage;
+    if ((!text && !image) || isLoading) return;
 
-    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: text };
+    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: text, imageName: image?.name };
     const assistantMessage: ChatMessage = { id: crypto.randomUUID(), role: "assistant", content: "" };
     const existingMessages = activeConversation?.messages ?? [];
     const messagesForRequest = [...existingMessages, userMessage];
@@ -303,15 +305,32 @@ export default function Home() {
     if (activeConversation) {
       updateMessages(conversationId, () => [...messagesForRequest, assistantMessage]);
     } else {
-      const newConversation: Conversation = { id: conversationId, title: text.length > 42 ? `${text.slice(0, 42)}…` : text, updatedAt: Date.now(), messages: [...messagesForRequest, assistantMessage] };
+      const title = text || `Discuss ${image!.name}`;
+      const newConversation: Conversation = { id: conversationId, title: title.length > 42 ? `${title.slice(0, 42)}…` : title, updatedAt: Date.now(), messages: [...messagesForRequest, assistantMessage] };
       setConversations((current) => [newConversation, ...current]);
       setActiveConversationId(conversationId);
     }
+    if (image) {
+      messageImagesRef.current[userMessage.id] = image;
+      setMessageImageUrls((current) => ({ ...current, [userMessage.id]: URL.createObjectURL(image) }));
+    }
     setInput("");
+    clearSelectedImage();
     setIsLoading(true);
 
     try {
-      const response = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: messagesForRequest.map(({ role, content }) => ({ role, content })) }) });
+      const formData = new FormData();
+      const requestMessages = messagesForRequest.slice(-20).map(({ id, role, content, imageName }) => {
+        const attachment = role === "user" ? messageImagesRef.current[id] : undefined;
+        if (attachment) formData.set(`image-${id}`, attachment);
+        return {
+          role,
+          content: imageName && !attachment ? `${content}\n[Image ${imageName} is unavailable. Ask the user to reattach it if needed.]` : content,
+          ...(attachment ? { image: `image-${id}` } : {})
+        };
+      });
+      formData.set("messages", JSON.stringify(requestMessages));
+      const response = await fetch("/api/chat", { method: "POST", body: formData });
       if (!response.ok || !response.body) throw new Error(await responseError(response, "The AI request could not be started."));
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -324,6 +343,8 @@ export default function Home() {
     } catch (caughtError) {
       const error = caughtError instanceof Error ? caughtError.message : "Something went wrong.";
       updateMessages(conversationId, (current) => current.map((message) => message.id === assistantMessage.id ? { ...message, content: `Sorry, ${error}` } : message));
+      setInput(text);
+      if (image) setSelectedImage(image);
     } finally { setIsLoading(false); }
   }
 
@@ -395,7 +416,10 @@ export default function Home() {
       setConversations((current) => [{ id: conversationId, title: title.length > 42 ? `${title.slice(0, 42)}…` : title, updatedAt: Date.now(), messages: [...existingMessages, userMessage, assistantMessage] }, ...current]);
       setActiveConversationId(conversationId);
     }
-    if (image) setMessageImageUrls((current) => ({ ...current, [userMessage.id]: URL.createObjectURL(image) }));
+    if (image) {
+      messageImagesRef.current[userMessage.id] = image;
+      setMessageImageUrls((current) => ({ ...current, [userMessage.id]: URL.createObjectURL(image) }));
+    }
     setInput("");
     clearSelectedImage();
     setIsLoading(true);
@@ -420,7 +444,7 @@ export default function Home() {
     <main className="app-shell">
       <aside ref={sidebarRef} className={`sidebar ${isMobileNavOpen ? "mobile-open" : ""}`} aria-label="Conversation history" role={isMobileNavOpen ? "dialog" : undefined} aria-modal={isMobileNavOpen ? true : undefined} onKeyDown={handleMobileNavigationKeyDown}>
         <div className="sidebar-top">
-          <div className="brand"><span className="brand-glyph" aria-hidden="true" /> Gemini Lab</div>
+          <div className="brand"><span className="brand-glyph" aria-hidden="true" /> Streamwise</div>
           <button className="new-chat-button" type="button" onClick={startNewChat} disabled={isLoading}><span>＋</span> New chat</button>
           <button ref={mobileMenuButtonRef} className="mobile-menu-button" type="button" aria-expanded={isMobileNavOpen} aria-controls="saved-work-navigation" onClick={() => setIsMobileNavOpen((current) => !current)}>{isMobileNavOpen ? "Close" : "Menu"}</button>
         </div>
@@ -448,9 +472,9 @@ export default function Home() {
         {mode === "knowledge" ? <KnowledgePanel /> : <>
         <section className="thread" aria-live="polite" aria-label="Chat messages">
           {messages.length === 0 ? (
-            mode === "spec" ? <div className="welcome"><span className="brand-glyph welcome-mark" aria-hidden="true" /><h2>Turn an idea into a task spec</h2><p>Describe a feature or attach a product screenshot, then review the generated criteria before saving a draft.</p><button type="button" className="prompt-chip" onClick={() => setInput("Add a mobile navigation menu with accessible keyboard controls.")}>Try an example feature</button></div> : <div className="welcome"><span className="brand-glyph welcome-mark" aria-hidden="true" /><h2>How can I help you learn today?</h2><p>Ask Gemini a question and follow up as you learn. Your conversations stay in this browser.</p><button type="button" className="prompt-chip" onClick={() => setInput("Explain streaming AI responses in a Next.js app using four short sections.")}>Explain streaming responses</button></div>
+            mode === "spec" ? <div className="welcome"><span className="brand-glyph welcome-mark" aria-hidden="true" /><h2>Turn an idea into a task spec</h2><p>Describe a feature or attach a product screenshot, then review the generated criteria before saving a draft.</p><button type="button" className="prompt-chip" onClick={() => setInput("Add a mobile navigation menu with accessible keyboard controls.")}>Try an example feature</button></div> : <div className="welcome"><span className="brand-glyph welcome-mark" aria-hidden="true" /><h2>How can I help you learn today?</h2><p>Ask Streamwise a question and follow up as you learn. Your conversations stay in this browser.</p><button type="button" className="prompt-chip" onClick={() => setInput("Explain streaming AI responses in a Next.js app using four short sections.")}>Explain streaming responses</button></div>
           ) : messages.map((message) => (
-            <article className={`message ${message.role}`} id={`message-${message.id}`} tabIndex={message.taskDraft ? -1 : undefined} key={message.id}><div className="avatar">{message.role === "user" ? "T" : <span className="brand-glyph" aria-hidden="true" />}</div><div className="message-body"><p className="message-role">{message.role === "user" ? "You" : "Gemini"}</p>{message.imageName ? <UserImageMessage name={message.imageName} previewUrl={messageImageUrls[message.id]} content={message.content} /> : message.taskSpec ? <TaskSpecCard spec={message.taskSpec} draft={message.taskDraft} isCreatingDraft={creatingDraftMessageId === message.id} onChange={(taskSpec) => updateTaskSpec(activeConversation!.id, message.id, taskSpec)} onCreateDraft={() => createTaskDraft(activeConversation!.id, message.id, message.taskSpec!)} /> : message.studyPlan ? <StudyPlanCard plan={message.studyPlan} /> : message.content ? <MarkdownMessage content={message.content} /> : <p>{isLoading ? <span className="typing">{message.pendingLabel ?? "Thinking"}<span>…</span></span> : "No response received."}</p>}</div></article>
+            <article className={`message ${message.role}`} id={`message-${message.id}`} tabIndex={message.taskDraft ? -1 : undefined} key={message.id}><div className="avatar">{message.role === "user" ? "T" : <span className="brand-glyph" aria-hidden="true" />}</div><div className="message-body"><p className="message-role">{message.role === "user" ? "You" : "Streamwise"}</p>{message.imageName ? <UserImageMessage name={message.imageName} previewUrl={messageImageUrls[message.id]} content={message.content} /> : message.taskSpec ? <TaskSpecCard spec={message.taskSpec} draft={message.taskDraft} isCreatingDraft={creatingDraftMessageId === message.id} onChange={(taskSpec) => updateTaskSpec(activeConversation!.id, message.id, taskSpec)} onCreateDraft={() => createTaskDraft(activeConversation!.id, message.id, message.taskSpec!)} /> : message.studyPlan ? <StudyPlanCard plan={message.studyPlan} /> : message.content ? <MarkdownMessage content={message.content} /> : <p>{isLoading ? <span className="typing">{message.pendingLabel ?? "Thinking"}<span>…</span></span> : "No response received."}</p>}</div></article>
           ))}
           <div ref={threadEndRef} />
         </section>
@@ -458,10 +482,10 @@ export default function Home() {
           {selectedImage && imagePreviewUrl && <div className="attachment-preview" aria-live="polite"><Image className="attachment-thumbnail" src={imagePreviewUrl} alt={`Preview of ${selectedImage.name}`} width={48} height={48} unoptimized /><span><strong>{selectedImage.name}</strong><small>{(selectedImage.size / 1024 / 1024).toFixed(1)} MB · ready to analyze</small></span><button type="button" onClick={clearSelectedImage} aria-label={`Remove ${selectedImage.name}`}>×</button></div>}
           {attachmentError && <p className="attachment-error" role="alert">{attachmentError}</p>}
           <label className="sr-only" htmlFor="prompt">Message</label>
-          <textarea ref={inputRef} id="prompt" value={input} onChange={(event) => setInput(event.target.value)} onPaste={pasteImage} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={selectedImage ? "Add context for this screenshot…" : mode === "spec" ? "Describe a feature…" : "Message Gemini…"} rows={1} disabled={isLoading} />
-          <div className="composer-actions"><input ref={imageInputRef} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => selectImage(event.target.files?.[0])} disabled={isLoading} /><button className="attach-button" type="button" onClick={() => imageInputRef.current?.click()} disabled={isLoading} aria-label="Attach product screenshot" title="Attach product screenshot">＋</button><button className="send-button" type="submit" disabled={isLoading || (!input.trim() && !selectedImage)} aria-label={mode === "spec" ? "Create task specification" : "Send message"}>↑</button></div>
+          <textarea ref={inputRef} id="prompt" value={input} onChange={(event) => setInput(event.target.value)} onPaste={pasteImage} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={selectedImage ? mode === "spec" ? "Add context for this screenshot…" : "Ask about this image…" : mode === "spec" ? "Describe a feature…" : "Message Streamwise…"} rows={1} disabled={isLoading} />
+          <div className="composer-actions"><input ref={imageInputRef} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => selectImage(event.target.files?.[0])} disabled={isLoading} /><button className="attach-button" type="button" onClick={() => imageInputRef.current?.click()} disabled={isLoading} aria-label={mode === "spec" ? "Attach product screenshot" : "Attach image"} title={mode === "spec" ? "Attach product screenshot" : "Attach image"}>＋</button><button className="send-button" type="submit" disabled={isLoading || (!input.trim() && !selectedImage)} aria-label={mode === "spec" ? "Create task specification" : "Send message"}>↑</button></div>
         </form>
-        <p className="disclaimer">Gemini can make mistakes. Do not enter sensitive information while using the free API tier.</p>
+        <p className="disclaimer">AI can make mistakes. Avoid entering sensitive information.</p>
         </>}
       </section>
     </main>
