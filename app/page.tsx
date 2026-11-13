@@ -6,6 +6,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { isSupportedImageType, MAX_IMAGE_BYTES } from "../lib/image-upload";
 import KnowledgePanel from "./knowledge-panel";
+import ThemeToggle from "./theme-toggle";
 
 type LegacyStudyPlan = {
   title: string;
@@ -153,6 +154,7 @@ export default function Home() {
   const [copiedDraftId, setCopiedDraftId] = useState<string | null>(null);
   const [hasHydrated, setHasHydrated] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [isMobileNavClosing, setIsMobileNavClosing] = useState(false);
   const threadEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -180,7 +182,7 @@ export default function Home() {
 
   function startNewChat() {
     if (isLoading) return;
-    setIsMobileNavOpen(false);
+    finishMobileNavigation();
     setActiveConversationId(null);
     setMenuConversationId(null);
     setInput("");
@@ -228,8 +230,18 @@ export default function Home() {
   }
 
   function closeMobileNavigation() {
-    setIsMobileNavOpen(false);
+    finishMobileNavigation();
     requestAnimationFrame(() => mobileMenuButtonRef.current?.focus());
+  }
+
+  function finishMobileNavigation() {
+    setIsMobileNavOpen(false);
+    if (!window.matchMedia("(max-width: 900px)").matches || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setIsMobileNavClosing(false);
+      return;
+    }
+    setIsMobileNavClosing(true);
+    window.setTimeout(() => setIsMobileNavClosing(false), 240);
   }
 
   function handleMobileNavigationKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
@@ -368,7 +380,7 @@ export default function Home() {
   }
 
   function openDraft(draft: DraftListItem) {
-    setIsMobileNavOpen(false);
+    finishMobileNavigation();
     setActiveConversationId(draft.conversationId);
     setMenuConversationId(null);
     window.setTimeout(() => {
@@ -442,17 +454,17 @@ export default function Home() {
 
   return (
     <main className="app-shell">
-      <aside ref={sidebarRef} className={`sidebar ${isMobileNavOpen ? "mobile-open" : ""}`} aria-label="Conversation history" role={isMobileNavOpen ? "dialog" : undefined} aria-modal={isMobileNavOpen ? true : undefined} onKeyDown={handleMobileNavigationKeyDown}>
+      <aside ref={sidebarRef} className={`sidebar ${isMobileNavOpen || isMobileNavClosing ? "mobile-open" : ""} ${isMobileNavClosing ? "mobile-closing" : ""}`} aria-label="Conversation history" role={isMobileNavOpen ? "dialog" : undefined} aria-modal={isMobileNavOpen ? true : undefined} onKeyDown={handleMobileNavigationKeyDown}>
         <div className="sidebar-top">
           <div className="brand"><span className="brand-glyph" aria-hidden="true" /> Streamwise</div>
           <button className="new-chat-button" type="button" onClick={startNewChat} disabled={isLoading}><span>＋</span> New chat</button>
-          <button ref={mobileMenuButtonRef} className="mobile-menu-button" type="button" aria-expanded={isMobileNavOpen} aria-controls="saved-work-navigation" onClick={() => setIsMobileNavOpen((current) => !current)}>{isMobileNavOpen ? "Close" : "Menu"}</button>
+          <button ref={mobileMenuButtonRef} className="mobile-menu-button" type="button" aria-expanded={isMobileNavOpen} aria-controls="saved-work-navigation" onClick={() => { if (isMobileNavOpen) finishMobileNavigation(); else { setIsMobileNavClosing(false); setIsMobileNavOpen(true); } }}>{isMobileNavOpen ? "Close" : "Menu"}</button>
         </div>
         <nav id="saved-work-navigation" className="conversation-list" aria-label="Saved conversations">
           <p className="sidebar-label">Recent</p>
           {!hasHydrated ? <p className="empty-history">Loading saved conversations…</p> : conversations.length === 0 ? <p className="empty-history">Your chats will appear here.</p> : conversations.map((conversation) => (
             <div className={`conversation-row ${conversation.id === activeConversationId ? "active" : ""}`} key={conversation.id}>
-              <button className="conversation-button" type="button" onClick={() => { setActiveConversationId(conversation.id); setMenuConversationId(null); setIsMobileNavOpen(false); }} disabled={isLoading}><ConversationTitle title={conversation.title} /><small>{formatDate(conversation.updatedAt)}</small></button>
+              <button className="conversation-button" type="button" onClick={() => { setActiveConversationId(conversation.id); setMenuConversationId(null); finishMobileNavigation(); }} disabled={isLoading}><ConversationTitle title={conversation.title} /><small>{formatDate(conversation.updatedAt)}</small></button>
               <div className="conversation-actions"><button className="conversation-more" type="button" onClick={() => setMenuConversationId((current) => current === conversation.id ? null : conversation.id)} aria-label={`More options for ${conversation.title}`} aria-expanded={menuConversationId === conversation.id} disabled={isLoading}>⋯</button>{menuConversationId === conversation.id && <div className="conversation-menu"><button type="button" onClick={() => deleteConversation(conversation.id)}>Delete chat</button></div>}</div>
             </div>
           ))}
@@ -467,7 +479,10 @@ export default function Home() {
       <section className="chat-panel">
         <header className="topbar">
           <div className="chat-heading"><details className="learning-status"><summary>Week 6 · Trustworthy public Streamwise <span className="status-chevron" aria-hidden="true" /></summary><div className="learning-log"><p><strong>Week 1</strong><span>Streaming chat, history, deployment</span></p><p><strong>Week 2</strong><span>JSON schema, Zod validation, editable specs</span></p><p><strong>Week 3</strong><span>Tool calling, approval, local draft workflow</span></p><p><strong>Week 4</strong><span>Screenshot intake, vision analysis, upload states</span></p><p><strong>Week 5</strong><span>Durable Project Documents and embeddings</span></p><p className="current"><strong>Week 6</strong><span>Shared allowances, safe degradation, and owner review</span></p></div></details><h1>{mode === "knowledge" ? "Portfolio Assistant" : activeConversation?.title ?? (mode === "spec" ? "New task spec" : "New conversation")}</h1></div>
-          <nav className="mode-switch" aria-label="Application mode"><button type="button" className={mode === "chat" ? "active" : ""} onClick={() => selectMode("chat")} aria-pressed={mode === "chat"}>Chat</button><button type="button" className={mode === "spec" ? "active" : ""} onClick={() => selectMode("spec")} aria-pressed={mode === "spec"}>Spec</button><button type="button" className={mode === "knowledge" ? "active" : ""} onClick={() => selectMode("knowledge")} aria-pressed={mode === "knowledge"}>Portfolio Assistant</button></nav>
+          <div className="header-tools">
+            <nav className="mode-switch" aria-label="Application mode"><button type="button" className={mode === "chat" ? "active" : ""} onClick={() => selectMode("chat")} aria-pressed={mode === "chat"}>Chat</button><button type="button" className={mode === "spec" ? "active" : ""} onClick={() => selectMode("spec")} aria-pressed={mode === "spec"}>Spec</button><button type="button" className={mode === "knowledge" ? "active" : ""} onClick={() => selectMode("knowledge")} aria-pressed={mode === "knowledge"}>Portfolio Assistant</button></nav>
+            <ThemeToggle />
+          </div>
         </header>
         {mode === "knowledge" ? <KnowledgePanel /> : <>
         <section className="thread" aria-live="polite" aria-label="Chat messages">

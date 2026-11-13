@@ -11,7 +11,10 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script id="restore-color-theme" dangerouslySetInnerHTML={{ __html: `var theme=null;try{theme=localStorage.getItem("streamwise-color-theme")}catch{}if(theme!=="light"&&theme!=="dark")theme=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.dataset.theme=theme;` }} />
+      </head>
       <body suppressHydrationWarning>{children}</body>
     </html>
   );
