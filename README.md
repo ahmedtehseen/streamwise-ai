@@ -2,6 +2,8 @@
 
 Streamwise AI turns project material into structured, reviewable work and source-backed project knowledge.
 
+Live application: [streamwise.tehseenahmed.me](https://streamwise.tehseenahmed.me).
+
 Built with Next.js (App Router, Turbopack), the Google Gemini API, Supabase Postgres with `pgvector`, and TypeScript.
 
 ---
@@ -91,11 +93,11 @@ Streamwise exposes four tools over stateless Streamable HTTP, using the same Por
 
 `ask_portfolio` consumes the same durable Visitor/global public allowance as the four web AI actions. It reuses grounding, Source References, Insufficient Evidence, degraded retrieval, and sanitized limit/reset outcomes. Production must supply the trusted Vercel client-address header and `VISITOR_ID_SECRET` for public calls. Missing trusted Visitor identity fails closed. Owner tools consume no public action and invoke no model.
 
-Codex is the supported Week 7 client. Add the public endpoint to the same trusted Codex configuration as the owner example below, replacing the example origin with the deployed HTTPS origin.
+Codex is the supported Week 7 client. Add the public endpoint to the same trusted Codex configuration as the owner example below.
 
 ```toml
 [mcp_servers.streamwise_public]
-url = "https://streamwise.example/api/mcp"
+url = "https://streamwise.tehseenahmed.me/api/mcp"
 enabled_tools = ["ask_portfolio"]
 ```
 
@@ -129,13 +131,13 @@ Schema failures use a fixed message without echoing rejected values. Service mes
 
 #### Codex owner MCP configuration
 
-Codex is the supported Week 7 owner MCP client. Export the same dedicated token configured as `MCP_OWNER_TOKEN` on the Streamwise deployment into the environment that launches Codex, then add the following to `~/.codex/config.toml` (or a trusted project's `.codex/config.toml`). Replace the example origin with the HTTPS Streamwise deployment:
+Codex is the supported Week 7 owner MCP client. Export the same dedicated token configured as `MCP_OWNER_TOKEN` on the Streamwise deployment into the environment that launches Codex, then add the following to `~/.codex/config.toml` (or a trusted project's `.codex/config.toml`). The production configuration is:
 
 ```toml
 approvals_reviewer = "user"
 
 [mcp_servers.streamwise_owner]
-url = "https://streamwise.example/api/mcp/owner"
+url = "https://streamwise.tehseenahmed.me/api/mcp/owner"
 bearer_token_env_var = "MCP_OWNER_TOKEN"
 enabled_tools = ["list_answer_flags", "get_answer_flag", "review_answer_flag"]
 default_tools_approval_mode = "prompt"
