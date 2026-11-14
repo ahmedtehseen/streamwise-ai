@@ -2,7 +2,7 @@
 
 import { type ClipboardEvent as ReactClipboardEvent, FormEvent, type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
-import Markdown from "react-markdown";
+import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { isSupportedImageType, MAX_IMAGE_BYTES } from "../lib/image-upload";
 import KnowledgePanel from "./knowledge-panel";
@@ -60,15 +60,18 @@ function useObjectUrl(file: File | null) {
   return url;
 }
 
+const markdownComponents: Components = {
+  a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>,
+  pre: ({ children }) => <pre tabIndex={0} role="region" aria-label="Code example">{children}</pre>
+};
+
 function MarkdownMessage({ content }: { content: string }) {
   return (
     <div className="markdown">
       <Markdown
         remarkPlugins={[remarkGfm]}
         skipHtml
-        components={{
-          a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>
-        }}
+        components={markdownComponents}
       >
         {content}
       </Markdown>
@@ -128,7 +131,7 @@ function StudyPlanCard({ plan }: { plan: LegacyStudyPlan }) {
 function TaskSpecCard({ spec, draft, isCreatingDraft, onChange, onCreateDraft }: { spec: TaskSpec; draft?: TaskDraft; isCreatingDraft: boolean; onChange: (next: TaskSpec) => void; onCreateDraft: () => void }) {
   return (
     <section className="task-spec" aria-label="Editable structured task specification">
-      <div className="spec-heading"><span>Structured task spec</span>{draft ? <span className="spec-priority">{spec.priority} priority</span> : <select value={spec.priority} onChange={(event) => onChange({ ...spec, priority: event.target.value as TaskSpec["priority"] })} aria-label="Task priority"><option value="low">Low priority</option><option value="medium">Medium priority</option><option value="high">High priority</option></select>}</div>
+      <div className="spec-heading"><h2>Structured task spec</h2>{draft ? <span className="spec-priority">{spec.priority} priority</span> : <select value={spec.priority} onChange={(event) => onChange({ ...spec, priority: event.target.value as TaskSpec["priority"] })} aria-label="Task priority"><option value="low">Low priority</option><option value="medium">Medium priority</option><option value="high">High priority</option></select>}</div>
       {draft ? <h2 className="spec-title">{spec.title}</h2> : <input className="spec-title" value={spec.title} onChange={(event) => onChange({ ...spec, title: event.target.value })} aria-label="Task title" />}
       {draft ? <p className="spec-summary">{spec.summary}</p> : <textarea className="spec-summary" value={spec.summary} onChange={(event) => onChange({ ...spec, summary: event.target.value })} aria-label="Task summary" rows={2} />}
       <div className="spec-section"><h3>Acceptance criteria</h3><ul>{spec.acceptanceCriteria.map((criterion, index) => <li key={index}>{draft ? <span className="spec-static-field">{criterion}</span> : <textarea value={criterion} onChange={(event) => { const acceptanceCriteria = [...spec.acceptanceCriteria]; acceptanceCriteria[index] = event.target.value; onChange({ ...spec, acceptanceCriteria }); }} aria-label={`Acceptance criterion ${index + 1}`} rows={1} />}</li>)}</ul></div>
@@ -153,12 +156,13 @@ export default function Home() {
   const [creatingDraftMessageId, setCreatingDraftMessageId] = useState<string | null>(null);
   const [copiedDraftId, setCopiedDraftId] = useState<string | null>(null);
   const [hasHydrated, setHasHydrated] = useState(false);
+  const [hasStorageError, setHasStorageError] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isMobileNavClosing, setIsMobileNavClosing] = useState(false);
   const threadEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
-  const sidebarRef = useRef<HTMLElement>(null);
+  const sidebarRef = useRef<HTMLDivElement>(null);
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const messageImageUrlsRef = useRef(messageImageUrls);
   const messageImagesRef = useRef<Record<string, File>>({});
@@ -175,14 +179,26 @@ export default function Home() {
     } catch { /* Ignore malformed local storage. */ } finally { setHasHydrated(true); }
   }, []);
 
-  useEffect(() => { if (hasHydrated) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations)); }, [conversations, hasHydrated]);
-  useEffect(() => { threadEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [messageCount, isLoading]);
+  useEffect(() => {
+    if (!hasHydrated) return;
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+      setHasStorageError(false);
+    } catch {
+      setHasStorageError(true);
+    }
+  }, [conversations, hasHydrated]);
+  useEffect(() => {
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth";
+    threadEndRef.current?.scrollIntoView({ behavior, block: "end" });
+  }, [messageCount, isLoading]);
   useEffect(() => { messageImageUrlsRef.current = messageImageUrls; }, [messageImageUrls]);
   useEffect(() => () => { Object.values(messageImageUrlsRef.current).forEach((url) => URL.revokeObjectURL(url)); }, []);
 
   function startNewChat() {
     if (isLoading) return;
     finishMobileNavigation();
+    if (mode === "knowledge") setMode("chat");
     setActiveConversationId(null);
     setMenuConversationId(null);
     setInput("");
@@ -381,11 +397,13 @@ export default function Home() {
 
   function openDraft(draft: DraftListItem) {
     finishMobileNavigation();
+    setMode("spec");
     setActiveConversationId(draft.conversationId);
     setMenuConversationId(null);
     window.setTimeout(() => {
       const target = document.getElementById(`message-${draft.messageId}`);
-      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+      const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth";
+      target?.scrollIntoView({ behavior, block: "center" });
       target?.focus({ preventScroll: true });
     }, 0);
   }
@@ -454,7 +472,7 @@ export default function Home() {
 
   return (
     <main className="app-shell">
-      <aside ref={sidebarRef} className={`sidebar ${isMobileNavOpen || isMobileNavClosing ? "mobile-open" : ""} ${isMobileNavClosing ? "mobile-closing" : ""}`} aria-label="Conversation history" role={isMobileNavOpen ? "dialog" : undefined} aria-modal={isMobileNavOpen ? true : undefined} onKeyDown={handleMobileNavigationKeyDown}>
+      <div ref={sidebarRef} className={`sidebar ${isMobileNavOpen || isMobileNavClosing ? "mobile-open" : ""} ${isMobileNavClosing ? "mobile-closing" : ""}`} aria-label="Conversation history" role={isMobileNavOpen ? "dialog" : "complementary"} aria-modal={isMobileNavOpen ? true : undefined} onKeyDown={handleMobileNavigationKeyDown}>
         <div className="sidebar-top">
           <div className="brand"><span className="brand-glyph" aria-hidden="true" /> Streamwise</div>
           <button className="new-chat-button" type="button" onClick={startNewChat} disabled={isLoading}><span>＋</span> New chat</button>
@@ -464,7 +482,14 @@ export default function Home() {
           <p className="sidebar-label">Recent</p>
           {!hasHydrated ? <p className="empty-history">Loading saved conversations…</p> : conversations.length === 0 ? <p className="empty-history">Your chats will appear here.</p> : conversations.map((conversation) => (
             <div className={`conversation-row ${conversation.id === activeConversationId ? "active" : ""}`} key={conversation.id}>
-              <button className="conversation-button" type="button" onClick={() => { setActiveConversationId(conversation.id); setMenuConversationId(null); finishMobileNavigation(); }} disabled={isLoading}><ConversationTitle title={conversation.title} /><small>{formatDate(conversation.updatedAt)}</small></button>
+              <button className="conversation-button" type="button" onClick={() => {
+                setActiveConversationId(conversation.id);
+                if (mode === "knowledge") {
+                  setMode(conversation.messages.some((message) => message.taskSpec) ? "spec" : "chat");
+                }
+                setMenuConversationId(null);
+                finishMobileNavigation();
+              }} disabled={isLoading}><ConversationTitle title={conversation.title} /><small>{formatDate(conversation.updatedAt)}</small></button>
               <div className="conversation-actions"><button className="conversation-more" type="button" onClick={() => setMenuConversationId((current) => current === conversation.id ? null : conversation.id)} aria-label={`More options for ${conversation.title}`} aria-expanded={menuConversationId === conversation.id} disabled={isLoading}>⋯</button>{menuConversationId === conversation.id && <div className="conversation-menu"><button type="button" onClick={() => deleteConversation(conversation.id)}>Delete chat</button></div>}</div>
             </div>
           ))}
@@ -474,9 +499,9 @@ export default function Home() {
           {!hasHydrated ? <p className="empty-drafts">Loading saved drafts…</p> : drafts.length === 0 ? <p className="empty-drafts">Approved task drafts will appear here.</p> : <ul className="draft-list">{drafts.map((draft) => <li key={draft.draft.id}><div className="draft-summary" title={draft.draft.taskSpec.title}><span>{draft.draft.taskSpec.title}</span><small>{draft.draft.taskSpec.priority} priority</small></div><div className="draft-controls"><button type="button" onClick={() => openDraft(draft)} aria-label={`Open ${draft.draft.taskSpec.title}`}>Open</button><button type="button" onClick={() => copyDraft(draft.draft)} aria-label={`Copy ${draft.draft.taskSpec.title}`}>{copiedDraftId === draft.draft.id ? "Copied" : "Copy"}</button><button className="draft-delete" type="button" onClick={() => deleteDraft(draft)} aria-label={`Delete ${draft.draft.taskSpec.title}`}>Delete</button></div></li>)}</ul>}
         </section>
         <p className="sidebar-note">Stored only in this browser</p>
-      </aside>
+      </div>
 
-      <section className="chat-panel">
+      <section className="chat-panel" inert={isMobileNavOpen}>
         <header className="topbar">
           <div className="chat-heading"><h1>{mode === "knowledge" ? "Portfolio Assistant" : activeConversation?.title ?? (mode === "spec" ? "New task spec" : "New conversation")}</h1></div>
           <div className="header-tools">
@@ -484,6 +509,7 @@ export default function Home() {
             <ThemeToggle />
           </div>
         </header>
+        {hasStorageError && <p className="storage-notice" role="status">Conversation saving is unavailable. Keep this page open to retain your current messages.</p>}
         {mode === "knowledge" ? <KnowledgePanel /> : <>
         <section className="thread" aria-live="polite" aria-label="Chat messages">
           {messages.length === 0 ? (
@@ -498,7 +524,7 @@ export default function Home() {
           {attachmentError && <p className="attachment-error" role="alert">{attachmentError}</p>}
           <label className="sr-only" htmlFor="prompt">Message</label>
           <textarea ref={inputRef} id="prompt" value={input} onChange={(event) => setInput(event.target.value)} onPaste={pasteImage} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={selectedImage ? mode === "spec" ? "Add context for this screenshot…" : "Ask about this image…" : mode === "spec" ? "Describe a feature…" : "Message Streamwise…"} rows={1} disabled={isLoading} />
-          <div className="composer-actions"><input ref={imageInputRef} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => selectImage(event.target.files?.[0])} disabled={isLoading} /><button className="attach-button" type="button" onClick={() => imageInputRef.current?.click()} disabled={isLoading} aria-label={mode === "spec" ? "Attach product screenshot" : "Attach image"} title={mode === "spec" ? "Attach product screenshot" : "Attach image"}>＋</button><button className="send-button" type="submit" disabled={isLoading || (!input.trim() && !selectedImage)} aria-label={mode === "spec" ? "Create task specification" : "Send message"}>↑</button></div>
+          <div className="composer-actions"><input ref={imageInputRef} hidden tabIndex={-1} aria-label={mode === "spec" ? "Product screenshot" : "Image attachment"} type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => selectImage(event.target.files?.[0])} disabled={isLoading} /><button className="attach-button" type="button" onClick={() => imageInputRef.current?.click()} disabled={isLoading} aria-label={mode === "spec" ? "Attach product screenshot" : "Attach image"} title={mode === "spec" ? "Attach product screenshot" : "Attach image"}>＋</button><button className="send-button" type="submit" disabled={isLoading || (!input.trim() && !selectedImage)} aria-label={mode === "spec" ? "Create task specification" : "Send message"}>↑</button></div>
         </form>
         <p className="disclaimer">AI can make mistakes. Avoid entering sensitive information.</p>
         </>}
