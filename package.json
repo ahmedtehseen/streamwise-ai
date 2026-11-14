@@ -11,6 +11,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:browser": "playwright test",
     "migrations:validate": "node scripts/validate-migrations.mjs",
     "allowance:verify": "node scripts/verify-public-allowance.mjs"
   },
@@ -28,6 +29,8 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.65.1",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
