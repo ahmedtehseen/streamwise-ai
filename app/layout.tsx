@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Streamwise AI",
-  description: "Public AI workflows and a source-grounded Portfolio Assistant backed by a Portfolio Owner-managed Knowledge Base",
+  description: "Public AI workflows and a Portfolio Assistant powered by hybrid retrieval-augmented generation (RAG) over owner-managed evidence",
   icons: {
     icon: "/icon.svg"
   }

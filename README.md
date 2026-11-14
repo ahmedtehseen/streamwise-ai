@@ -1,6 +1,6 @@
 # Streamwise AI
 
-Streamwise AI turns project material into structured, reviewable work and source-backed project knowledge.
+Streamwise AI turns project material into structured, reviewable work and answers portfolio questions through a Portfolio Assistant powered by hybrid retrieval-augmented generation (RAG).
 
 Live application: [streamwise.tehseenahmed.me](https://streamwise.tehseenahmed.me).
 
