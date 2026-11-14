@@ -198,7 +198,13 @@ npm run migrations:validate # Verify Supabase migration schema invariants
 npm run lint                # Run ESLint across app and lib
 npm test                    # Run Vitest unit and integration suite
 npm run build               # Verify Next.js production build
+npx playwright install chromium # Install the browser on first use
+npm run test:browser        # Run browser regressions against the production build
 ```
+
+The browser suite starts its own server on port 3100 and uses simulated Project Document responses. It checks menu transitions frame by frame across both themes and mobile/tablet widths, plus keyboard focus, reduced motion, rapid reopening, accessibility, and desktop navigation. Failed runs retain screenshots and traces in `test-results/`, with an HTML report in `playwright-report/`.
+
+GitHub Actions runs lint, unit/API tests, the production build with type checking, and browser regressions under the `Quality and browser regression` check.
 
 The automated test suite verifies:
 - Multi-format file validation, text extraction, and rejection of unsupported formats (e.g., `.docx`).
