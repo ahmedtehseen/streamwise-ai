@@ -64,6 +64,8 @@ export default function KnowledgePanel() {
   const [replacingDocumentId, setReplacingDocumentId] = useState<string | null>(null);
   const [discardingReplacementId, setDiscardingReplacementId] = useState<string | null>(null);
   const [documentError, setDocumentError] = useState<string | null>(null);
+  const [documentLoadError, setDocumentLoadError] = useState<string | null>(null);
+  const [documentLoadAttempt, setDocumentLoadAttempt] = useState(0);
   const [questionError, setQuestionError] = useState<string | null>(null);
   const [isDocumentDrawerOpen, setIsDocumentDrawerOpen] = useState(false);
   const [selectedUploadName, setSelectedUploadName] = useState<string | null>(null);
@@ -78,7 +80,7 @@ export default function KnowledgePanel() {
   const [flagReviewError, setFlagReviewError] = useState<string | null>(null);
   const [reviewingFlagId, setReviewingFlagId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const drawerRef = useRef<HTMLElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
   const drawerCloseRef = useRef<HTMLButtonElement>(null);
   const drawerTriggerRef = useRef<HTMLButtonElement>(null);
   const hasReadyDocument = documents.some((document) => document.status === "ready");
@@ -101,12 +103,16 @@ export default function KnowledgePanel() {
   }
 
   useEffect(() => {
-    const savedKey = sessionStorage.getItem("portfolio_admin_key");
-    if (savedKey) setAdminKey(savedKey);
+    try {
+      const savedKey = sessionStorage.getItem("portfolio_admin_key");
+      if (savedKey) setAdminKey(savedKey);
+    } catch { /* The owner can enter a key for this visit when storage is unavailable. */ }
   }, []);
 
   useEffect(() => {
     const controller = new AbortController();
+    setIsLoading(true);
+    setDocumentLoadError(null);
     async function loadDocuments() {
       try {
         const response = await fetch("/api/knowledge/documents", { signal: controller.signal });
@@ -114,14 +120,14 @@ export default function KnowledgePanel() {
         if (!response.ok || !payload.documents) throw new Error(payload.error || "The Knowledge Base could not be loaded.");
         setDocuments(payload.documents);
       } catch (caughtError) {
-        if (!controller.signal.aborted) setDocumentError(caughtError instanceof Error ? caughtError.message : "The Knowledge Base could not be loaded.");
+        if (!controller.signal.aborted) setDocumentLoadError(caughtError instanceof Error ? caughtError.message : "The Knowledge Base could not be loaded.");
       } finally {
         if (!controller.signal.aborted) setIsLoading(false);
       }
     }
     loadDocuments();
     return () => controller.abort();
-  }, []);
+  }, [documentLoadAttempt]);
 
   useEffect(() => {
     if (!isDocumentDrawerOpen) return;
@@ -429,9 +435,16 @@ export default function KnowledgePanel() {
     }
   }
 
+  const documentLoadNotice = documentLoadError && (
+    <div className="knowledge-error" role="alert">
+      <p>{documentLoadError}</p>
+      <button type="button" onClick={() => setDocumentLoadAttempt((attempt) => attempt + 1)}>Retry loading documents</button>
+    </div>
+  );
+
   return (
     <section className="knowledge-panel" aria-labelledby="knowledge-heading">
-      <div className="knowledge-canvas">
+      <div className="knowledge-canvas" inert={isDocumentDrawerOpen}>
         <header className="knowledge-intro">
           <div>
             <p className="eyebrow">Portfolio Assistant</p>
@@ -442,16 +455,17 @@ export default function KnowledgePanel() {
             ref={drawerTriggerRef}
             className="document-drawer-trigger"
             type="button"
-            aria-label={isLoading ? "Project Documents, loading" : `Project Documents, ${documents.length} uploaded`}
+            aria-label={isLoading ? "Project Documents, loading" : documentLoadError ? "Project Documents, unavailable" : `Project Documents, ${documents.length} uploaded`}
             aria-expanded={isDocumentDrawerOpen}
             aria-controls="document-drawer"
             onClick={() => setIsDocumentDrawerOpen(true)}
           >
-            <span>Documents</span><strong>{isLoading ? "…" : documents.length}</strong>
+            <span>Documents</span><strong>{isLoading ? "…" : documentLoadError ? "—" : documents.length}</strong>
           </button>
         </header>
 
         {questionError && <p className="knowledge-error" role="alert">{questionError}</p>}
+        {documentLoadNotice}
 
         <div className="knowledge-prompts">
           {samplePrompts.map((prompt) => (
@@ -468,9 +482,9 @@ export default function KnowledgePanel() {
 
         <form className="knowledge-question" onSubmit={askQuestion}>
           <label htmlFor="knowledge-question">What would you like to know?</label>
-          <textarea id="knowledge-question" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder={isLoading ? "Loading Project Documents…" : hasReadyDocument ? "Ask about decisions, requirements, policies, or project details…" : "Add a Project Document to start asking grounded questions"} disabled={isLoading || !hasReadyDocument || isAsking} rows={4} required />
+          <textarea id="knowledge-question" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder={isLoading ? "Loading Project Documents…" : documentLoadError ? "Retry loading Project Documents to ask a question" : hasReadyDocument ? "Ask about decisions, requirements, policies, or project details…" : "Add a Project Document to start asking grounded questions"} disabled={isLoading || !hasReadyDocument || isAsking} rows={4} required />
           <div className="knowledge-question-footer">
-            <span>{isLoading ? "Loading the Knowledge Base…" : hasReadyDocument ? "Answers include Source References" : "Add at least one ready Project Document"}</span>
+            <span>{isLoading ? "Loading the Knowledge Base…" : documentLoadError ? "The Knowledge Base could not be loaded" : hasReadyDocument ? "Answers include Source References" : "Add at least one ready Project Document"}</span>
             <button type="submit" disabled={isLoading || !hasReadyDocument || !question.trim() || isAsking}>{isAsking ? "Searching…" : "Ask question"}</button>
           </div>
         </form>
@@ -545,9 +559,9 @@ export default function KnowledgePanel() {
 
       {isDocumentDrawerOpen && (
         <div className="document-drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDocumentDrawer(); }}>
-          <aside ref={drawerRef} id="document-drawer" className="document-drawer" role="dialog" aria-modal="true" aria-labelledby="document-drawer-title" onKeyDown={handleDrawerKeyDown}>
+          <div ref={drawerRef} id="document-drawer" className="document-drawer" role="dialog" aria-modal="true" aria-labelledby="document-drawer-title" onKeyDown={handleDrawerKeyDown}>
             <header className="document-drawer-header">
-              <div><p className="eyebrow">Knowledge sources</p><h3 id="document-drawer-title">Project Documents</h3></div>
+              <div><p className="eyebrow">Knowledge sources</p><h2 id="document-drawer-title">Project Documents</h2></div>
               <button ref={drawerCloseRef} className="document-drawer-close" type="button" onClick={closeDocumentDrawer} aria-label="Close project documents">×</button>
             </header>
             <div className="document-drawer-content">
@@ -560,7 +574,7 @@ export default function KnowledgePanel() {
                   value={adminKey}
                   onChange={(e) => {
                     setAdminKey(e.target.value);
-                    sessionStorage.setItem("portfolio_admin_key", e.target.value);
+                    try { sessionStorage.setItem("portfolio_admin_key", e.target.value); } catch { /* Keep the key in memory for this visit. */ }
                   }}
                 />
               </div>
@@ -597,8 +611,8 @@ export default function KnowledgePanel() {
                 <button type="submit" disabled={isUploading || !selectedUploadName}>{isUploading ? "Indexing…" : "Upload and index"}</button>
               </form>
               {documentError && <p className="knowledge-error" role="alert">{documentError}</p>}
-              <div className="knowledge-list-heading"><h4>Uploaded Project Documents</h4><span>{isLoading ? "…" : documents.length}</span></div>
-              {isLoading ? <p className="knowledge-empty">Loading the Knowledge Base…</p> : documents.length === 0 ? <p className="knowledge-empty">No documents yet. Add a Project Document to get started.</p> : (
+              <div className="knowledge-list-heading"><h3>Uploaded Project Documents</h3><span>{isLoading ? "…" : documentLoadError ? "—" : documents.length}</span></div>
+              {isLoading ? <p className="knowledge-empty">Loading the Knowledge Base…</p> : documentLoadError ? documentLoadNotice : documents.length === 0 ? <p className="knowledge-empty">No documents yet. Add a Project Document to get started.</p> : (
                 <ul className="knowledge-list">
                   {documents.map((document) => (
                     <li key={document.id}>
@@ -654,7 +668,7 @@ export default function KnowledgePanel() {
                 </ul>
               )}
             </div>
-          </aside>
+          </div>
         </div>
       )}
     </section>
