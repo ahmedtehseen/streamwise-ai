@@ -1,6 +1,6 @@
 "use client";
 
-import { type ClipboardEvent as ReactClipboardEvent, FormEvent, type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ClipboardEvent as ReactClipboardEvent, FormEvent, type KeyboardEvent as ReactKeyboardEvent, type Ref, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -143,6 +143,22 @@ function TaskSpecCard({ spec, draft, isCreatingDraft, onChange, onCreateDraft }:
 
 type ApplicationMode = "chat" | "spec" | "knowledge";
 
+function SidebarHeader({ isLoading, isMenuOpen, onNewChat, onToggleMenu, menuButtonRef }: {
+  isLoading: boolean;
+  isMenuOpen: boolean;
+  onNewChat: () => void;
+  onToggleMenu: () => void;
+  menuButtonRef: Ref<HTMLButtonElement>;
+}) {
+  return (
+    <div className="sidebar-top">
+      <div className="brand"><span className="brand-glyph" aria-hidden="true" /> Streamwise</div>
+      <button className="new-chat-button" type="button" onClick={onNewChat} disabled={isLoading}><span>＋</span> New chat</button>
+      <button ref={menuButtonRef} className="mobile-menu-button" type="button" aria-expanded={isMenuOpen} aria-controls="saved-work-navigation" onClick={onToggleMenu}>{isMenuOpen ? "Close" : "Menu"}</button>
+    </div>
+  );
+}
+
 export default function Home() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -164,6 +180,7 @@ export default function Home() {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const mobileDrawerButtonRef = useRef<HTMLButtonElement>(null);
   const messageImageUrlsRef = useRef(messageImageUrls);
   const messageImagesRef = useRef<Record<string, File>>({});
   const imagePreviewUrl = useObjectUrl(selectedImage);
@@ -194,6 +211,9 @@ export default function Home() {
   }, [messageCount, isLoading]);
   useEffect(() => { messageImageUrlsRef.current = messageImageUrls; }, [messageImageUrls]);
   useEffect(() => () => { Object.values(messageImageUrlsRef.current).forEach((url) => URL.revokeObjectURL(url)); }, []);
+  useEffect(() => {
+    if (isMobileNavOpen) mobileDrawerButtonRef.current?.focus();
+  }, [isMobileNavOpen]);
 
   function startNewChat() {
     if (isLoading) return;
@@ -248,6 +268,15 @@ export default function Home() {
   function closeMobileNavigation() {
     finishMobileNavigation();
     requestAnimationFrame(() => mobileMenuButtonRef.current?.focus());
+  }
+
+  function toggleMobileNavigation() {
+    if (isMobileNavOpen) {
+      closeMobileNavigation();
+      return;
+    }
+    setIsMobileNavClosing(false);
+    setIsMobileNavOpen(true);
   }
 
   function finishMobileNavigation() {
@@ -472,12 +501,11 @@ export default function Home() {
 
   return (
     <main className="app-shell">
-      <div ref={sidebarRef} className={`sidebar ${isMobileNavOpen || isMobileNavClosing ? "mobile-open" : ""} ${isMobileNavClosing ? "mobile-closing" : ""}`} aria-label="Conversation history" role={isMobileNavOpen ? "dialog" : "complementary"} aria-modal={isMobileNavOpen ? true : undefined} onKeyDown={handleMobileNavigationKeyDown}>
-        <div className="sidebar-top">
-          <div className="brand"><span className="brand-glyph" aria-hidden="true" /> Streamwise</div>
-          <button className="new-chat-button" type="button" onClick={startNewChat} disabled={isLoading}><span>＋</span> New chat</button>
-          <button ref={mobileMenuButtonRef} className="mobile-menu-button" type="button" aria-expanded={isMobileNavOpen} aria-controls="saved-work-navigation" onClick={() => { if (isMobileNavOpen) finishMobileNavigation(); else { setIsMobileNavClosing(false); setIsMobileNavOpen(true); } }}>{isMobileNavOpen ? "Close" : "Menu"}</button>
-        </div>
+      <div className="mobile-header" inert={isMobileNavOpen}>
+        <SidebarHeader isLoading={isLoading} isMenuOpen={false} onNewChat={startNewChat} onToggleMenu={toggleMobileNavigation} menuButtonRef={mobileMenuButtonRef} />
+      </div>
+      <div ref={sidebarRef} className={`sidebar ${isMobileNavOpen || isMobileNavClosing ? "mobile-open" : ""} ${isMobileNavClosing ? "mobile-closing" : ""}`} aria-label="Conversation history" role={isMobileNavOpen ? "dialog" : "complementary"} aria-modal={isMobileNavOpen ? true : undefined} inert={isMobileNavClosing} onKeyDown={handleMobileNavigationKeyDown}>
+        <SidebarHeader isLoading={isLoading} isMenuOpen={isMobileNavOpen} onNewChat={startNewChat} onToggleMenu={toggleMobileNavigation} menuButtonRef={mobileDrawerButtonRef} />
         <nav id="saved-work-navigation" className="conversation-list" aria-label="Saved conversations">
           <p className="sidebar-label">Recent</p>
           {!hasHydrated ? <p className="empty-history">Loading saved conversations…</p> : conversations.length === 0 ? <p className="empty-history">Your chats will appear here.</p> : conversations.map((conversation) => (
