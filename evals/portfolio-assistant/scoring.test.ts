@@ -36,7 +36,7 @@ const sourcePatterns = { backend: "backend", senior: "sr_software_engineer|sr so
 
 const datasets = {
   "dataset.v1.jsonl": { single_fact: 24, synthesis: 8, abstention: 10, claim_safety: 6, adversarial: 6, conflicting_sources: 6 },
-  "dataset.v2.jsonl": { single_fact: 22, synthesis: 8, abstention: 10, claim_safety: 6, adversarial: 6, incorrect_source: 8 }
+  "dataset.v2.jsonl": { single_fact: 24, synthesis: 8, abstention: 8, claim_safety: 6, adversarial: 6, incorrect_source: 8 }
 };
 
 describe.each(Object.entries(datasets))("%s", (file, expectedCounts) => {
@@ -81,8 +81,21 @@ describe.each(Object.entries(datasets))("%s", (file, expectedCounts) => {
 describe("dataset.v2.jsonl ground truth", () => {
   const items = parseDataset(readFileSync(path.join(here, "dataset.v2.jsonl"), "utf8"));
 
-  it("draws every evidence phrase from the canonical resume only", () => {
-    expect(new Set(items.flatMap((i) => i.evidence.map((e) => e.source)))).toEqual(new Set(["canonical"]));
+  it("never uses the deliberately incorrect resumes as evidence", () => {
+    const sources = new Set(items.flatMap((i) => i.evidence.map((e) => e.source)));
+    for (const incorrect of ["backend", "legacy", "senior"]) expect(sources.has(incorrect)).toBe(false);
+  });
+
+  it("maps the canonical source to the corrected and currently indexed resumes but not the incorrect ones", () => {
+    const documents = JSON.parse(readFileSync(path.join(here, "documents.json"), "utf8")) as Record<string, string>;
+    const canonical = new RegExp(documents.canonical, "i");
+    for (const name of ["tehseen-ahmed-resume.md", "Tehseen_Ahmed_Senior_Software_Engineer_Resume.pdf", "Tehseen_Ahmed_Remote_Software_Engineer_Resume.pdf", "Tehseen_Ahmed_Senior_NodeJS_Developer_Resume.pdf"]) {
+      expect(canonical.test(name), name).toBe(true);
+    }
+    for (const name of ["Tehseen_Sr_Software_Engineer.pdf", "Tehseen_Ahmed_Resume.pdf", "Tehseen Ahmed Resume - Senior Backend Engineer.docx"]) {
+      expect(canonical.test(name), name).toBe(false);
+    }
+    expect(new RegExp(documents.museum, "i").test("museum-advocate-portfolio-evidence-package.md")).toBe(false);
   });
 
   it("has evidence that satisfies the required facts of every answerable item", () => {
