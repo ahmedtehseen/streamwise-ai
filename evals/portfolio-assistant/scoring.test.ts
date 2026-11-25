@@ -89,7 +89,7 @@ describe("dataset.v2.jsonl ground truth", () => {
   it("maps the canonical source to the corrected and currently indexed resumes but not the incorrect ones", () => {
     const documents = JSON.parse(readFileSync(path.join(here, "documents.json"), "utf8")) as Record<string, string>;
     const canonical = new RegExp(documents.canonical, "i");
-    for (const name of ["tehseen-ahmed-resume.md", "Tehseen_Ahmed_Senior_Software_Engineer_Resume.pdf", "Tehseen_Ahmed_Remote_Software_Engineer_Resume.pdf", "Tehseen_Ahmed_Senior_NodeJS_Developer_Resume.pdf"]) {
+    for (const name of ["tehseen-ahmed-resume.md", "tehseen-ahmed-resume.txt", "Tehseen_Ahmed_Senior_Software_Engineer_Resume.pdf", "Tehseen_Ahmed_Remote_Software_Engineer_Resume.pdf", "Tehseen_Ahmed_Senior_NodeJS_Developer_Resume.pdf"]) {
       expect(canonical.test(name), name).toBe(true);
     }
     for (const name of ["Tehseen_Sr_Software_Engineer.pdf", "Tehseen_Ahmed_Resume.pdf", "Tehseen Ahmed Resume - Senior Backend Engineer.docx"]) {

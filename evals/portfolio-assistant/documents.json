@@ -1,6 +1,6 @@
 {
   "$comment": "Maps dataset evidence sources to Project Document names in the Knowledge Base (case-insensitive regex). Edit if documents are renamed. Evidence from a source with no indexed document is excluded from recall and reported. 'canonical' covers the owner's correct resume and the indexed resume variants that share its facts; v1 sources (backend, legacy, senior) are deliberately incorrect resumes that are not indexed.",
-  "canonical": "^tehseen-ahmed-resume\\.md$|senior_software_engineer_resume|remote_software_engineer_resume|senior_nodejs_developer_resume",
+  "canonical": "^tehseen-ahmed-resume\\.(md|txt)$|senior_software_engineer_resume|remote_software_engineer_resume|senior_nodejs_developer_resume",
   "museum": "^museum-advocate-(website-case-study\\.md|portfolio\\.html|upwork-entry\\.md)$",
   "serveme": "^serve-me-",
   "site": "^index\\.html$|^tehseenahmed-me-home\\.md$",
