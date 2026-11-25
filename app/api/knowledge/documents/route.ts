@@ -74,7 +74,7 @@ export async function POST(request: Request) {
     }
   });
   if (insertError) {
-    console.error("Document indexing insert error:", insertError);
+    console.error("Document indexing insert error:", { code: insertError.code });
   }
   if (insertError?.message.includes("KNOWLEDGE_BASE_CAPACITY")) {
     return Response.json({ error: "The Knowledge Base can contain at most 20 Project Documents." }, { status: 409 });

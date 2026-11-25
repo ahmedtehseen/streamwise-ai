@@ -219,6 +219,25 @@ The automated test suite verifies:
 
 ---
 
+## Request Bounds & Failure Behavior
+
+These limits apply to every deployment (constants live in `lib/generation.ts`, `lib/chat-stream.ts` and `lib/knowledge/server.ts`):
+
+| Bound | Value | What the user sees |
+| --- | --- | --- |
+| Non-streaming generation deadline (spec, draft, Grounded Answer), incl. retry and fallback | 30 s | `504` "Generation took too long. Please try again." |
+| Streaming chat deadline, from request to last token | 90 s | Partial text kept, marked "Response interrupted: The answer took too long and was stopped." |
+| Embedding request deadline | 15 s | `504` with code `gemini_timeout` (retryable) |
+| Chat request body (declared `Content-Length`) | 4 images × 5 MB + 1 MB | `413` |
+| Newest chat message | 8,000 characters | `413` |
+| Chat history sent to the model | newest 20 messages, 40,000 characters, 4 images | Older turns are dropped, not rejected |
+
+**Cancellation:** the browser's request signal is passed to Gemini. If the client disconnects or cancels the response, the provider call and upstream stream are aborted.
+
+**Terminal stream semantics:** `/api/chat` streams plain text. A stream only ends successfully when Gemini reports `STOP` or `MAX_TOKENS` and some text was produced. A missing or abnormal finish reason, an in-stream provider error, a deadline, or an empty answer ends the stream with a record separator (`\u001e`) followed by `{"error":"..."}`; the UI keeps the partial answer and shows the reason. `parseChatStream` in `lib/chat-stream.ts` is the client-side parser.
+
+**Sanitized errors:** provider failures are logged as `{ httpStatus, providerStatus }` only, never the provider message or body, which can echo prompts or document text. Unexpected Grounded Answer errors return a generic message instead of the raw exception text.
+
 ## Knowledge Base Requirements & Invariants
 
 - **Supported Formats**:

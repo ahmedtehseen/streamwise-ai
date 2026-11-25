@@ -22,7 +22,7 @@ describe("Chat image messages", () => {
   beforeEach(() => {
     vi.stubEnv("GEMINI_API_KEY", "test-key");
     generation.mockReset().mockImplementation(async () => ({
-      providerResponse: new Response('data: {"candidates":[{"content":{"parts":[{"text":"A screenshot."}]}}]}\n')
+      providerResponse: new Response('data: {"candidates":[{"content":{"parts":[{"text":"A screenshot."}]},"finishReason":"STOP"}]}\n')
     }));
   });
   afterEach(() => vi.unstubAllEnvs());

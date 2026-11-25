@@ -28,6 +28,8 @@ jobs:
         run: npm ci
       - name: Lint
         run: npm run lint
+      - name: Validate migrations
+        run: npm run migrations:validate
       - name: Unit and API tests
         run: npm test
       - name: Build and typecheck
