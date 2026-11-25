@@ -132,7 +132,7 @@ describe("compatible generation fallback at API route seams", () => {
       }
       if (url.includes("gemini-3.5-flash-lite")) return dailyQuotaResponse();
       if (url.includes("streamGenerateContent")) {
-        return new Response('data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}\n');
+        return new Response('data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]},"finishReason":"STOP"}]}\n');
       }
 
       const body = JSON.parse(String(init?.body)) as { tools?: unknown; systemInstruction?: unknown };
@@ -312,7 +312,7 @@ describe("compatible generation fallback at API route seams", () => {
     const { POST } = await import("./chat/route");
 
     const response = await POST(routeRequest("/api/chat", { messages: [{ role: "user", content: "Hello" }] }));
-    await expect(response.text()).rejects.toThrow("stream interrupted");
+    await expect(response.text()).resolves.toBe(`Partial\u001e${JSON.stringify({ error: "The model stream failed." })}`);
 
     expect(provider).toHaveBeenCalledTimes(1);
     expect(String(provider.mock.calls[0][0])).toContain("gemini-3.5-flash-lite");

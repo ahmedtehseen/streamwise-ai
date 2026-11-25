@@ -5,6 +5,7 @@ import Image from "next/image";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { isSupportedImageType, MAX_IMAGE_BYTES } from "../lib/image-upload";
+import { parseChatStream } from "../lib/chat-stream";
 import KnowledgePanel from "./knowledge-panel";
 import ThemeToggle from "./theme-toggle";
 
@@ -391,15 +392,22 @@ export default function Home() {
       if (!response.ok || !response.body) throw new Error(await responseError(response, "The AI request could not be started."));
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      let raw = "";
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        updateMessages(conversationId, (current) => current.map((message) => message.id === assistantMessage.id ? { ...message, content: message.content + chunk } : message));
+        raw += decoder.decode(value, { stream: true });
+        const { text: streamedText } = parseChatStream(raw);
+        updateMessages(conversationId, (current) => current.map((message) => message.id === assistantMessage.id ? { ...message, content: streamedText } : message));
       }
+      const streamError = parseChatStream(raw).error;
+      if (streamError) throw new Error(streamError);
     } catch (caughtError) {
       const error = caughtError instanceof Error ? caughtError.message : "Something went wrong.";
-      updateMessages(conversationId, (current) => current.map((message) => message.id === assistantMessage.id ? { ...message, content: `Sorry, ${error}` } : message));
+      // Keep any streamed text and mark it as interrupted instead of replacing it.
+      updateMessages(conversationId, (current) => current.map((message) => message.id === assistantMessage.id
+        ? { ...message, content: message.content ? `${message.content}\n\n_Response interrupted: ${error}_` : `Sorry, ${error}` }
+        : message));
       setInput(text);
       if (image) setSelectedImage(image);
     } finally { setIsLoading(false); }

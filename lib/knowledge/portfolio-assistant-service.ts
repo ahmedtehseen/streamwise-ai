@@ -1,7 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
-import { GenerationUnavailableError } from "../generation";
+import { GenerationCancelledError, GenerationTimeoutError, GenerationUnavailableError } from "../generation";
 import { admitPublicAction } from "../public-allowance";
 import { issueAnswerResponseIdentity } from "./answer-flags";
 import {
@@ -231,12 +231,20 @@ export async function askPortfolioAssistant(input: {
     if (error instanceof GenerationUnavailableError) {
       return failure(error.message, "generation_unavailable", true, 503);
     }
+    if (error instanceof GenerationTimeoutError) {
+      return failure(error.message, "generation_timeout", true, 504);
+    }
+    if (error instanceof GenerationCancelledError) {
+      return failure(error.message, "generation_cancelled", false, 499);
+    }
     if (error instanceof KnowledgeError) {
       return failure(error.message, error.code, error.retryable, error.status);
     }
+    // Unknown errors can carry provider or database detail; never echo them to the client.
+    console.error("Grounded Answer failed:", error instanceof Error ? error.name : typeof error);
     return {
       ok: false,
-      error: { error: error instanceof Error ? error.message : "A Grounded Answer could not be generated." },
+      error: { error: "A Grounded Answer could not be generated." },
       status: 502
     };
   }

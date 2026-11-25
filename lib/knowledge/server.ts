@@ -2,7 +2,7 @@ import "server-only";
 
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
-import { requestGeneration } from "../generation";
+import { generationSignal, GenerationTimeoutError, providerErrorSummary, requestGeneration } from "../generation";
 
 export const KNOWLEDGE_BASE_ID = "00000000-0000-0000-0000-000000000001";
 export const EMBEDDING_MODEL = "gemini-embedding-2";
@@ -44,6 +44,7 @@ export type KnowledgeErrorCode =
   | "gemini_authentication_failed"
   | "gemini_throttled"
   | "gemini_unavailable"
+  | "gemini_timeout"
   | "invalid_model_output";
 
 export class KnowledgeError extends Error {
@@ -82,18 +83,31 @@ type EmbeddingErrorPolicy = {
   invalidEmbedding: () => Error;
 };
 
+/** Deadline for one embedding request. */
+export const EMBEDDING_DEADLINE_MS = 15_000;
+
 async function requestEmbedding(value: string, apiKey: string, policy: EmbeddingErrorPolicy) {
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${EMBEDDING_MODEL}:embedContent`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-    body: JSON.stringify({
-      content: { parts: [{ text: `${policy.prefix}: ${value}` }] },
-      output_dimensionality: EMBEDDING_DIMENSION
-    })
-  });
+  const { signal, classify } = generationSignal(EMBEDDING_DEADLINE_MS);
+  let response: Response;
+  try {
+    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${EMBEDDING_MODEL}:embedContent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+      body: JSON.stringify({
+        content: { parts: [{ text: `${policy.prefix}: ${value}` }] },
+        output_dimensionality: EMBEDDING_DIMENSION
+      }),
+      signal
+    });
+  } catch (error) {
+    const classified = classify(error);
+    if (classified instanceof GenerationTimeoutError) {
+      throw new KnowledgeError("Gemini embedding took too long.", "gemini_timeout", true, 504);
+    }
+    throw classified;
+  }
   if (!response.ok) {
-    const errorBody = await response.text().catch(() => "");
-    console.error("Gemini embedding failed:", response.status, errorBody);
+    console.error("Gemini embedding failed:", await providerErrorSummary(response));
     throw policy.responseFailure(response);
   }
 
@@ -243,8 +257,7 @@ export async function generateGroundedAnswer(
     }
   });
   if (!response.ok) {
-    const errorBody = await response.text().catch(() => "");
-    console.error("Gemini answer generation failed:", response.status, errorBody);
+    console.error("Gemini answer generation failed:", await providerErrorSummary(response));
     throw geminiFailure(response, "answer");
   }
   const payload = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
