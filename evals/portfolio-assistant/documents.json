@@ -1,6 +1,7 @@
 {
-  "$comment": "Maps dataset evidence sources to Project Document names in the Knowledge Base (case-insensitive regex). Edit if documents are renamed. Evidence from a source with no indexed document is excluded from recall and reported.",
+  "$comment": "Maps dataset evidence sources to Project Document names in the Knowledge Base (case-insensitive regex). Edit if documents are renamed. Evidence from a source with no indexed document is excluded from recall and reported. v2 uses only 'canonical'; v1 used the three deliberately incorrect resumes.",
+  "canonical": "^tehseen-ahmed-resume\\.md$|senior_software_engineer_resume",
   "backend": "backend",
-  "legacy": "tehseen_ahmed_resume",
+  "legacy": "^tehseen_ahmed_resume\\b",
   "senior": "sr_software_engineer|sr software engineer"
 }

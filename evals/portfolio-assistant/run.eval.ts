@@ -3,6 +3,7 @@
  * as the public API (without the public allowance), then scores the results.
  *
  *   npm run eval:portfolio                 # all items, judge on
+ *   EVAL_DATASET=dataset.v1.jsonl ...      # earlier dataset (default v2)
  *   EVAL_LIMIT=5 npm run eval:portfolio    # first 5 items
  *   EVAL_JUDGE=0 npm run eval:portfolio    # skip the LLM judge
  *   EVAL_DELAY_MS=6000 ...                 # pause between items (free-tier rate limits)
@@ -34,7 +35,8 @@ import {
 vi.mock("server-only", () => ({}));
 
 const here = path.dirname(new URL(import.meta.url).pathname);
-const DATASET = "dataset.v1.jsonl";
+const DATASET = process.env.EVAL_DATASET ?? "dataset.v2.jsonl";
+if (!/^dataset\.v\d+\.jsonl$/.test(DATASET)) throw new Error("EVAL_DATASET must name a dataset.vN.jsonl file in evals/portfolio-assistant.");
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -148,7 +150,8 @@ test("Portfolio Assistant live eval", async () => {
     `| Retrieval recall after distance threshold | ${pct(summary.recallSelected)} |`,
     `| Required facts present (answered, answerable) | ${pct(summary.requiredFactsRate)} |`,
     `| Groundedness (judge: supported paragraphs) | ${pct(summary.groundedness)} |`,
-    `| Conflicting sources surfaced | ${pct(summary.conflictSurfacedRate)} |`,
+    `| Canonical value given, no incorrect-source leak | ${pct(summary.incorrectSourceAccuracy)} |`,
+    `| Conflicting sources surfaced (v1 only) | ${pct(summary.conflictSurfacedRate)} |`,
     `| Forbidden-claim violations | ${summary.forbiddenClaimViolations.length} ${summary.forbiddenClaimViolations.join(", ")} |`,
     `| Latency p50 / p95 (answer only, judge excluded) | ${summary.latencyP50Ms} ms / ${summary.latencyP95Ms} ms |`,
     "",

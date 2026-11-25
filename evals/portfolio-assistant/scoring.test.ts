@@ -34,22 +34,20 @@ function item(overrides: Partial<EvalItem> = {}): EvalItem {
 
 const sourcePatterns = { backend: "backend", senior: "sr_software_engineer|sr software engineer" };
 
-describe("dataset.v1.jsonl", () => {
-  const items = parseDataset(readFileSync(path.join(here, "dataset.v1.jsonl"), "utf8"));
+const datasets = {
+  "dataset.v1.jsonl": { single_fact: 24, synthesis: 8, abstention: 10, claim_safety: 6, adversarial: 6, conflicting_sources: 6 },
+  "dataset.v2.jsonl": { single_fact: 22, synthesis: 8, abstention: 10, claim_safety: 6, adversarial: 6, incorrect_source: 8 }
+};
+
+describe.each(Object.entries(datasets))("%s", (file, expectedCounts) => {
+  const items = parseDataset(readFileSync(path.join(here, file), "utf8"));
 
   it("has the planned category mix", () => {
     const counts = Object.fromEntries(
       [...new Set(items.map((i) => i.category))].map((category) => [category, items.filter((i) => i.category === category).length])
     );
     expect(items).toHaveLength(60);
-    expect(counts).toEqual({
-      single_fact: 24,
-      synthesis: 8,
-      abstention: 10,
-      claim_safety: 6,
-      adversarial: 6,
-      conflicting_sources: 6
-    });
+    expect(counts).toEqual(expectedCounts);
   });
 
   it("only uses sources mapped in documents.json", () => {
@@ -69,6 +67,42 @@ describe("dataset.v1.jsonl", () => {
     const forbidden = items.flatMap((i) => i.forbidden_claims).join("\n");
     expect(forbidden).toMatch(/1,\?800|1800|1,800/);
     expect(forbidden).toMatch(/200/);
+  });
+
+  it("keeps every forbidden claim from firing on its own evidence", () => {
+    for (const i of items) {
+      for (const pattern of i.forbidden_claims) {
+        for (const evidence of i.evidence) expect(new RegExp(pattern, "i").test(evidence.text), `${i.id}: ${pattern}`).toBe(false);
+      }
+    }
+  });
+});
+
+describe("dataset.v2.jsonl ground truth", () => {
+  const items = parseDataset(readFileSync(path.join(here, "dataset.v2.jsonl"), "utf8"));
+
+  it("draws every evidence phrase from the canonical resume only", () => {
+    expect(new Set(items.flatMap((i) => i.evidence.map((e) => e.source)))).toEqual(new Set(["canonical"]));
+  });
+
+  it("has evidence that satisfies the required facts of every answerable item", () => {
+    for (const i of items.filter((x) => x.expected_outcome === "answered")) {
+      expect(requiredFactsMet(i, i.evidence.map((e) => e.text).join(" ")).met, i.id).toBe(true);
+    }
+  });
+
+  it("flags values from the deliberately incorrect resumes", () => {
+    const byId = Object.fromEntries(items.map((i) => [i.id, i]));
+    expect(forbiddenClaimHits(byId["inc-003"], "Tehseen has over 7 years of experience.")).not.toEqual([]);
+    expect(forbiddenClaimHits(byId["inc-003"], "Tehseen has nearly 10 years of experience, including 8+ years of experience building Node.js backends.")).toEqual([]);
+    expect(forbiddenClaimHits(byId["inc-004"], "Tehseen delivered 100+ projects.")).not.toEqual([]);
+    expect(forbiddenClaimHits(byId["inc-002"], "Digitaleap: 2019-01 - Current")).not.toEqual([]);
+    expect(forbiddenClaimHits(byId["inc-002"], "Tehseen led Digitaleap from Aug 2019 to Aug 2024.")).toEqual([]);
+  });
+
+  it("contains no contact details", () => {
+    const text = readFileSync(path.join(here, "dataset.v2.jsonl"), "utf8");
+    expect(text).not.toMatch(/@[a-z0-9-]+\.[a-z]|\+92|\d{3}\s?\d{3}\s?\d{4}/i);
   });
 });
 
@@ -156,6 +190,12 @@ describe("summarize", () => {
     { id: "d", category: "conflicting_sources", status: "ok", outcome: "answered", outcomeCorrect: true, conflictSurfaced: true, forbiddenHits: [], latencyMs: 400 },
     { id: "e", category: "abstention", status: "error", errorCode: "gemini_timeout", latencyMs: 15000 }
   ];
+  const withIncorrectSource: EvalResult[] = [
+    ...results,
+    { id: "f", category: "incorrect_source", status: "ok", outcome: "answered", outcomeCorrect: true, requiredFactsMet: true, forbiddenHits: [], latencyMs: 100 },
+    { id: "g", category: "incorrect_source", status: "ok", outcome: "answered", outcomeCorrect: true, requiredFactsMet: true, forbiddenHits: ["100"], latencyMs: 100 },
+    { id: "h", category: "incorrect_source", status: "ok", outcome: "insufficient_evidence", outcomeCorrect: false, latencyMs: 100 }
+  ];
   const summary = summarize(results);
 
   it("separates errors from scored items", () => {
@@ -178,6 +218,11 @@ describe("summarize", () => {
   it("weights groundedness by judged paragraphs and lists violations", () => {
     expect(summary.groundedness).toBe(0.75);
     expect(summary.forbiddenClaimViolations).toEqual(["c"]);
+  });
+
+  it("scores incorrect-source items on canonical value and no leak", () => {
+    expect(summarize(withIncorrectSource).incorrectSourceAccuracy).toBeCloseTo(1 / 3);
+    expect(summary.incorrectSourceAccuracy).toBeNull();
   });
 
   it("reports latency percentiles for successful calls only", () => {

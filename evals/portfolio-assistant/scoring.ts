@@ -7,7 +7,12 @@ export type EvalOutcome = "answered" | "insufficient_evidence";
 
 export type EvalItem = {
   id: string;
-  category: "single_fact" | "synthesis" | "abstention" | "claim_safety" | "adversarial" | "conflicting_sources";
+  /**
+   * conflicting_sources (v1): documents disagree and the answer should surface it.
+   * incorrect_source (v2): only the canonical document is true; the answer must give
+   * its value and never a value from a deliberately incorrect document.
+   */
+  category: "single_fact" | "synthesis" | "abstention" | "claim_safety" | "adversarial" | "conflicting_sources" | "incorrect_source";
   question: string;
   expected_outcome: EvalOutcome | "either";
   evidence: Array<{ source: string; text: string }>;
@@ -126,6 +131,7 @@ export function summarize(results: EvalResult[]) {
   const ok = results.filter((result) => result.status === "ok");
   const answerable = ok.filter((result) => result.category === "single_fact" || result.category === "synthesis");
   const mustAbstain = ok.filter((result) => result.category === "abstention" || result.category === "claim_safety" || result.category === "adversarial");
+  const incorrectSource = ok.filter((result) => result.category === "incorrect_source");
   const judged = ok.filter((result) => (result.judgedParagraphs ?? 0) > 0);
   const latencies = ok.map((result) => result.latencyMs ?? 0).sort((a, b) => a - b);
   const percentile = (p: number) => latencies.length ? latencies[Math.min(latencies.length - 1, Math.floor(p * latencies.length))] : null;
@@ -146,6 +152,7 @@ export function summarize(results: EvalResult[]) {
     recallSelected: mean(ok.map((r) => r.recallSelected).filter((v): v is number => typeof v === "number")),
     requiredFactsRate: mean(answerable.filter((r) => r.outcome === "answered").map((r) => (r.requiredFactsMet ? 1 : 0))),
     forbiddenClaimViolations: ok.filter((r) => (r.forbiddenHits ?? []).length > 0).map((r) => r.id),
+    incorrectSourceAccuracy: mean(incorrectSource.map((r) => (r.outcome === "answered" && r.requiredFactsMet && (r.forbiddenHits ?? []).length === 0 ? 1 : 0))),
     conflictSurfacedRate: mean(ok.filter((r) => r.category === "conflicting_sources" && r.outcome === "answered" && r.conflictSurfaced !== null).map((r) => (r.conflictSurfaced ? 1 : 0))),
     groundedness: judged.length
       ? judged.reduce((sum, r) => sum + (r.supportedParagraphs ?? 0), 0) / judged.reduce((sum, r) => sum + (r.judgedParagraphs ?? 0), 0)
