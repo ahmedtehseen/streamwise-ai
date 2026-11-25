@@ -3,7 +3,7 @@
   "canonical": "^tehseen-ahmed-resume\\.md$|senior_software_engineer_resume|remote_software_engineer_resume|senior_nodejs_developer_resume",
   "museum": "^museum-advocate-(website-case-study\\.md|portfolio\\.html|upwork-entry\\.md)$",
   "serveme": "^serve-me-",
-  "site": "^index\\.html$",
+  "site": "^index\\.html$|^tehseenahmed-me-home\\.md$",
   "backend": "backend",
   "legacy": "^tehseen_ahmed_resume\\b",
   "senior": "sr_software_engineer|sr software engineer"
