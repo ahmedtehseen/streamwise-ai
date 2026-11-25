@@ -1,0 +1,6 @@
+{
+  "$comment": "Maps dataset evidence sources to Project Document names in the Knowledge Base (case-insensitive regex). Edit if documents are renamed. Evidence from a source with no indexed document is excluded from recall and reported.",
+  "backend": "backend",
+  "legacy": "tehseen_ahmed_resume",
+  "senior": "sr_software_engineer|sr software engineer"
+}

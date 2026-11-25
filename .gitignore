@@ -5,3 +5,4 @@ tsconfig.tsbuildinfo
 playwright-report/
 test-results/
 
+evals/portfolio-assistant/results/*.json
