@@ -22,6 +22,7 @@ import { answerPortfolioQuestion, type PortfolioPipelineTrace } from "../../lib/
 import { judgeParagraph, JUDGE_PROMPT_VERSION } from "./judge";
 import {
   conflictSurfaced,
+  documentUsage,
   evidenceRecall,
   forbiddenClaimHits,
   outcomeCorrect,
@@ -69,9 +70,10 @@ test("Portfolio Assistant live eval", async () => {
     const toChunks = (chunks = trace.matchedChunks ?? []) => chunks.map((c) => ({ documentName: c.document_name, text: c.text }));
     const recallTop5 = evidenceRecall(item, toChunks(trace.matchedChunks), sourcePatterns, indexedDocumentNames);
     const recallSelected = evidenceRecall(item, toChunks(trace.selectedChunks), sourcePatterns, indexedDocumentNames);
+    const retrievedDocuments = (trace.matchedChunks ?? []).map((c) => c.document_name);
 
     if (!result.ok) {
-      results.push({ id: item.id, category: item.category, question: item.question, status: "error", errorCode: result.error.code ?? `http_${result.status}`, latencyMs, recallAt5: recallTop5.recall });
+      results.push({ id: item.id, category: item.category, question: item.question, status: "error", errorCode: result.error.code ?? `http_${result.status}`, latencyMs, recallAt5: recallTop5.recall, retrievedDocuments });
       console.log(`[${index + 1}/${items.length}] ${item.id} error ${result.error.code ?? result.status}`);
     } else {
       const answer = result.value;
@@ -107,6 +109,8 @@ test("Portfolio Assistant live eval", async () => {
         judgedParagraphs: useJudge ? answer.paragraphs.length : 0,
         supportedParagraphs: supported,
         latencyMs,
+        retrievedDocuments,
+        citedDocuments: [...new Set(answer.paragraphs.flatMap((p) => p.sourceReferences.map((s) => s.documentName)))],
         answer: answer.paragraphs.map((p) => p.text),
         judgeNotes,
         missingEvidence: recallTop5.missing,
@@ -154,6 +158,14 @@ test("Portfolio Assistant live eval", async () => {
     `| Conflicting sources surfaced (v1 only) | ${pct(summary.conflictSurfacedRate)} |`,
     `| Forbidden-claim violations | ${summary.forbiddenClaimViolations.length} ${summary.forbiddenClaimViolations.join(", ")} |`,
     `| Latency p50 / p95 (answer only, judge excluded) | ${summary.latencyP50Ms} ms / ${summary.latencyP95Ms} ms |`,
+    "",
+    "## Document usage",
+    "",
+    "Items whose raw top-5 included the document, items whose answer cited it, and how those cited items scored. \"Only source\" lists passing items that cited nothing else.",
+    "",
+    "| Document | In top-5 | Cited | Cited, passing | Cited, failing | Only source for |",
+    "| --- | --- | --- | --- | --- | --- |",
+    ...documentUsage(results).map((u) => `| ${u.documentName} | ${u.retrievedIn} | ${u.citedIn} | ${u.citedInPassing} | ${u.citedInFailing} | ${u.passingOnlySource.join(", ") || "—"} |`),
     "",
     "## Items needing attention",
     "",

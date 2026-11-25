@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   conflictSurfaced,
+  documentUsage,
   evidenceRecall,
   forbiddenClaimHits,
   normalizeText,
@@ -241,5 +242,26 @@ describe("summarize", () => {
   it("reports latency percentiles for successful calls only", () => {
     expect(summary.latencyP50Ms).toBe(300);
     expect(summary.latencyP95Ms).toBe(400);
+  });
+});
+
+describe("documentUsage", () => {
+  const results: EvalResult[] = [
+    { id: "a", category: "single_fact", status: "ok", outcome: "answered", outcomeCorrect: true, requiredFactsMet: true, forbiddenHits: [], retrievedDocuments: ["resume", "notes", "resume"], citedDocuments: ["resume"] },
+    { id: "b", category: "synthesis", status: "ok", outcome: "answered", outcomeCorrect: true, requiredFactsMet: true, forbiddenHits: [], retrievedDocuments: ["notes", "case"], citedDocuments: ["notes", "case"] },
+    { id: "c", category: "abstention", status: "ok", outcome: "answered", outcomeCorrect: false, forbiddenHits: [], retrievedDocuments: ["notes"], citedDocuments: ["notes"] },
+    { id: "d", category: "single_fact", status: "ok", outcome: "answered", outcomeCorrect: true, requiredFactsMet: false, forbiddenHits: [], retrievedDocuments: ["notes"], citedDocuments: ["notes"] },
+    { id: "e", category: "single_fact", status: "error", errorCode: "gemini_unavailable", retrievedDocuments: ["resume"] }
+  ];
+  const usage = Object.fromEntries(documentUsage(results).map((u) => [u.documentName, u]));
+
+  it("counts each item once per document and splits citations by pass or fail", () => {
+    expect(usage.resume).toMatchObject({ retrievedIn: 2, citedIn: 1, citedInPassing: 1, citedInFailing: 0, passingOnlySource: ["a"] });
+    expect(usage.notes).toMatchObject({ retrievedIn: 4, citedIn: 3, citedInPassing: 1, citedInFailing: 2, passingOnlySource: [] });
+    expect(usage.case).toMatchObject({ retrievedIn: 1, citedIn: 1, citedInPassing: 1, passingOnlySource: [] });
+  });
+
+  it("sorts by how often a document is retrieved", () => {
+    expect(documentUsage(results).map((u) => u.documentName)).toEqual(["notes", "resume", "case"]);
   });
 });

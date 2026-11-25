@@ -121,7 +121,47 @@ export type EvalResult = {
   supportedParagraphs?: number;
   judgedParagraphs?: number;
   latencyMs?: number;
+  /** Document names of the raw top-5 chunks, in rank order (duplicates kept). */
+  retrievedDocuments?: string[];
+  /** Document names the Grounded Answer cited. */
+  citedDocuments?: string[];
 };
+
+export type DocumentUsage = {
+  documentName: string;
+  retrievedIn: number;
+  citedIn: number;
+  citedInPassing: number;
+  citedInFailing: number;
+  passingOnlySource: string[];
+};
+
+/**
+ * Passing means the answer was expected and complete: outcome correct, required
+ * facts present, no forbidden claims. "Only source" lists passing items whose
+ * citations came from this document alone, i.e. answers that depended on it.
+ */
+export function itemPassed(result: EvalResult) {
+  return result.status === "ok" && result.outcomeCorrect === true && result.requiredFactsMet !== false && (result.forbiddenHits ?? []).length === 0;
+}
+
+export function documentUsage(results: EvalResult[]): DocumentUsage[] {
+  const names = new Set(results.flatMap((r) => [...(r.retrievedDocuments ?? []), ...(r.citedDocuments ?? [])]));
+  return [...names]
+    .map((documentName) => {
+      const retrieved = results.filter((r) => (r.retrievedDocuments ?? []).includes(documentName));
+      const cited = results.filter((r) => (r.citedDocuments ?? []).includes(documentName));
+      return {
+        documentName,
+        retrievedIn: retrieved.length,
+        citedIn: cited.length,
+        citedInPassing: cited.filter(itemPassed).length,
+        citedInFailing: cited.filter((r) => !itemPassed(r)).length,
+        passingOnlySource: cited.filter((r) => itemPassed(r) && new Set(r.citedDocuments).size === 1).map((r) => r.id)
+      };
+    })
+    .sort((a, b) => b.retrievedIn - a.retrievedIn || a.documentName.localeCompare(b.documentName));
+}
 
 function mean(values: number[]) {
   return values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length;
