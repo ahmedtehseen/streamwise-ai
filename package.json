@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:browser": "playwright test",
     "migrations:validate": "node scripts/validate-migrations.mjs",
-    "allowance:verify": "node scripts/verify-public-allowance.mjs"
+    "allowance:verify": "node scripts/verify-public-allowance.mjs",
+    "eval:portfolio": "vitest run -c vitest.eval.config.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

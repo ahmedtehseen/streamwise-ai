@@ -132,8 +132,33 @@ export async function askPortfolioAssistant(input: {
     };
   }
 
+  return answerPortfolioQuestion(input.question, configuration, client);
+}
+
+type KnowledgeConfiguration = ReturnType<typeof knowledgeConfiguration>;
+type KnowledgeClient = ReturnType<typeof createKnowledgeClient>;
+export type MatchedChunk = z.infer<typeof matchedChunkSchema>;
+
+/** What retrieval saw for one question; filled in when a caller passes it (used by evals). */
+export type PortfolioPipelineTrace = {
+  matchedChunks?: MatchedChunk[];
+  selectedChunks?: MatchedChunk[];
+  degradedSearch?: boolean;
+};
+
+/**
+ * Retrieval plus Grounded Answer generation, without the Knowledge Base count
+ * check or public allowance. askPortfolioAssistant is the public entry point;
+ * the offline eval harness calls this directly so it measures the same path.
+ */
+export async function answerPortfolioQuestion(
+  rawQuestion: string,
+  configuration: KnowledgeConfiguration,
+  client: KnowledgeClient,
+  trace?: PortfolioPipelineTrace
+): Promise<PortfolioAssistantResult> {
   try {
-    const question = input.question.trim();
+    const question = rawQuestion.trim();
     const searchKeywords = extractSearchKeywords(question);
     let degradedSearch = false;
     let queryEmbedding: number[] | null = null;
@@ -172,6 +197,11 @@ export async function askPortfolioAssistant(input: {
     const { data, error: matchError } = rpcResult;
     if (matchError) return failure("The Knowledge Base could not be searched.", "retrieval_unavailable", true, 503);
     const matchedChunks = z.array(matchedChunkSchema).parse(data);
+    if (trace) {
+      trace.matchedChunks = matchedChunks;
+      trace.selectedChunks = [];
+      trace.degradedSearch = degradedSearch;
+    }
     const relevantChunks = matchedChunks.filter(
       (chunk) => (!degradedSearch && chunk.cosine_distance <= KNOWLEDGE_DISTANCE_THRESHOLD) || (chunk.fts_rank && chunk.fts_rank > 0)
     );
@@ -184,6 +214,7 @@ export async function askPortfolioAssistant(input: {
     }
 
     const selectedChunks = relevantChunks.slice(0, 5);
+    if (trace) trace.selectedChunks = selectedChunks;
     const evidence = selectedChunks.map((chunk, index) => ({ id: `source-${index + 1}`, text: chunk.text }));
     const answer = await generateGroundedAnswer(question, evidence, configuration.geminiApiKey);
     if (answer.outcome === "insufficient_evidence") {

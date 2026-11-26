@@ -283,6 +283,20 @@ npm run allowance:verify
 
 ---
 
+## Portfolio Assistant Evaluation
+
+`evals/portfolio-assistant/` holds versioned 60-question eval sets for the Portfolio Assistant: single facts, multi-part synthesis, questions the Knowledge Base cannot answer, claim-safety checks, and prompt-injection attempts. `dataset.v2.jsonl` (default) takes career facts from the owner's canonical resume and project facts from the public case studies, and adds `incorrect_source` items that fail when an answer repeats a value from a deliberately incorrect resume. `dataset.v1.jsonl` is the earlier set that measured whether answers surfaced disagreements between documents (`EVAL_DATASET=dataset.v1.jsonl`). Each item labels the expected outcome (Grounded Answer or Insufficient Evidence), the evidence phrases retrieval should find, required facts, and claims the answer must never make. `documents.json` maps evidence sources to Project Document names.
+
+```sh
+npm run eval:portfolio                 # live run: retrieval + Grounded Answer + LLM judge
+EVAL_LIMIT=5 npm run eval:portfolio    # first 5 items only
+EVAL_JUDGE=0 npm run eval:portfolio    # skip the groundedness judge
+```
+
+The live run reads `GEMINI_API_KEY`, the Supabase URL and the service role key from `.env.local`, calls the same pipeline as the public API without consuming the public allowance, and writes `results/<run-id>.md` (committed baseline reports) and `results/<run-id>.json` (ignored, includes answer text). It reports outcome accuracy, abstention accuracy, evidence recall in the raw top-5 and after the distance threshold, required-fact coverage, forbidden-claim violations, incorrect-source leaks, judge-estimated groundedness, and latency. The judge uses the same Gemini models as the app, so spot-check its verdicts by hand. The scorers and dataset shape are unit-tested in the normal `npm test` suite; the live run is never part of CI.
+
+---
+
 ## Progressive Milestones Overview
 
 - **Week 1 · Streaming Chat & Conversational Memory**: Browser-to-server SSE streaming, private server-side key management, web `ReadableStream` decoding, and client-side conversation persistence.
