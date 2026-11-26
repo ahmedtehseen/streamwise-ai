@@ -112,6 +112,9 @@ describe("dataset.v2.jsonl ground truth", () => {
     expect(forbiddenClaimHits(byId["inc-004"], "Tehseen delivered 100+ projects.")).not.toEqual([]);
     expect(forbiddenClaimHits(byId["inc-002"], "Digitaleap: 2019-01 - Current")).not.toEqual([]);
     expect(forbiddenClaimHits(byId["inc-002"], "Tehseen led Digitaleap from Aug 2019 to Aug 2024.")).toEqual([]);
+    expect(forbiddenClaimHits(byId["inc-002"], "Tehseen is still running Digitaleap.")).not.toEqual([]);
+    // A correct answer that negates the question must not count as a leak.
+    expect(forbiddenClaimHits(byId["inc-002"], "No, Tehseen is not still running Digitaleap; he led it from August 2019 to August 2024.")).toEqual([]);
   });
 
   it("contains no contact details", () => {
